@@ -29,9 +29,12 @@ export async function refundOrder(
   if (!o) return { ok: false, reason: "Order not found" };
   if (o.status !== "paid") return { ok: false, reason: "Only paid orders can be refunded" };
   if (amount <= 0 || amount > o.total) return { ok: false, reason: "Refund amount out of range" };
+  if (!o.paymentChargeId) {
+    return { ok: false, reason: "Order has no payment charge id; cannot refund through provider" };
+  }
   const refundCents = Math.round(amount * 100);
   const provider = getPaymentProvider();
-  const result = await provider.refundCharge(`order:${o.id}`, refundCents);
+  const result = await provider.refundCharge(o.paymentChargeId, refundCents);
   if (!result.ok) {
     return { ok: false, reason: result.reason ?? "Refund failed" };
   }

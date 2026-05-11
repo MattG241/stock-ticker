@@ -6,13 +6,14 @@ import { store } from "@/lib/store";
 
 const schema = z.object({
   staffId: z.string().min(1),
-  paymentMethod: z.enum(["card", "cash", "split"]),
+  paymentMethod: z.enum(["card", "cash"]),
   notes: z.string().optional(),
   items: z
     .array(
       z.object({
         drinkId: z.string().min(1),
         quantity: z.number().int().positive().max(99),
+        expectedUnitPrice: z.number().positive().max(10_000).optional(),
       }),
     )
     .default([]),
@@ -21,6 +22,7 @@ const schema = z.object({
     .object({ channel: z.enum(["email", "sms"]), to: z.string().min(1) })
     .optional(),
   idempotencyKey: z.string().optional(),
+  cashTendered: z.number().nonnegative().max(100_000).optional(),
 });
 
 export const dynamic = "force-dynamic";

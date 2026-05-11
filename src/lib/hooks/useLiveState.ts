@@ -129,8 +129,17 @@ export function useLiveState() {
       es.addEventListener("drink.updated", () => {
         snapshot();
       });
+      es.addEventListener("drink.deleted", () => {
+        snapshot();
+      });
       es.addEventListener("settings.updated", () => {
         snapshot();
+      });
+      es.addEventListener("order.placed", () => {
+        lastBeat = Date.now();
+      });
+      es.addEventListener("order.updated", () => {
+        lastBeat = Date.now();
       });
     };
     connect();

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatAud } from "@/lib/money";
 import { Logo } from "@/components/Logo";
 
@@ -10,48 +10,82 @@ interface OrderRow {
   status: string;
   paidAt: string | null;
   createdAt: string;
+  barAcked: boolean;
   lines: { drinkId: string; drinkNameSnapshot: string; quantity: number }[];
 }
 
-const ACK_KEY = "drink-exchange-bar-ack";
-
 export function BarClient() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [ack, setAck] = useState<Set<string>>(new Set());
+  const [pendingAck, setPendingAck] = useState<Set<string>>(new Set());
+  const inflightRef = useRef<Set<string>>(new Set());
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = window.localStorage.getItem(ACK_KEY);
-        if (raw) setAck(new Set(JSON.parse(raw)));
-      } catch {}
-    }
-    const load = async () => {
+  const load = useCallback(async () => {
+    try {
       const res = await fetch("/api/orders", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         setOrders(data.orders ?? []);
       }
-    };
-    load();
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
+    } catch {
+      // network error - keep last state
+    }
   }, []);
 
-  const toggleAck = (id: string) => {
-    setAck((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      try {
-        window.localStorage.setItem(ACK_KEY, JSON.stringify([...next]));
-      } catch {}
-      return next;
-    });
-  };
+  useEffect(() => {
+    load();
+    // SSE drives near-realtime updates; polling is a fallback.
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource("/api/events");
+      es.addEventListener("order.placed", load);
+      es.addEventListener("order.updated", load);
+    } catch {
+      // SSE may not be available - polling will cover us.
+    }
+    const t = setInterval(load, 5000);
+    return () => {
+      clearInterval(t);
+      es?.close();
+    };
+  }, [load]);
 
-  const pending = orders.filter((o) => o.status === "paid" && !ack.has(o.id)).slice(0, 30);
-  const done = orders.filter((o) => o.status === "paid" && ack.has(o.id)).slice(0, 10);
+  const setAck = useCallback(
+    async (id: string, acked: boolean) => {
+      if (inflightRef.current.has(id)) return;
+      inflightRef.current.add(id);
+      // Optimistic update.
+      setPendingAck((prev) => {
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
+      setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, barAcked: acked } : o)));
+      try {
+        const res = await fetch(`/api/orders/${id}/ack`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ acked, actor: "bar" }),
+        });
+        if (!res.ok) {
+          // Roll back.
+          setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, barAcked: !acked } : o)));
+        }
+      } catch {
+        setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, barAcked: !acked } : o)));
+      } finally {
+        inflightRef.current.delete(id);
+        setPendingAck((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    },
+    [],
+  );
+
+  const pending = orders.filter((o) => o.status === "paid" && !o.barAcked).slice(0, 30);
+  const done = orders.filter((o) => o.status === "paid" && o.barAcked).slice(0, 10);
 
   return (
     <div className="min-h-screen">
@@ -76,6 +110,7 @@ export function BarClient() {
               {pending.map((o) => {
                 const age = Math.round((Date.now() - new Date(o.paidAt ?? o.createdAt).getTime()) / 1000);
                 const stale = age > 90;
+                const busy = pendingAck.has(o.id);
                 return (
                   <li
                     key={o.id}
@@ -98,8 +133,12 @@ export function BarClient() {
                         </li>
                       ))}
                     </ul>
-                    <button onClick={() => toggleAck(o.id)} className="btn-primary mt-auto">
-                      Mark made
+                    <button
+                      onClick={() => setAck(o.id, true)}
+                      disabled={busy}
+                      className="btn-primary mt-auto disabled:opacity-50"
+                    >
+                      {busy ? "..." : "Mark made"}
                     </button>
                   </li>
                 );
@@ -120,7 +159,11 @@ export function BarClient() {
                       {o.lines.map((l) => `${l.quantity}x ${l.drinkNameSnapshot}`).join(", ")}
                     </span>
                   </span>
-                  <button onClick={() => toggleAck(o.id)} className="btn text-[10px]">
+                  <button
+                    onClick={() => setAck(o.id, false)}
+                    disabled={pendingAck.has(o.id)}
+                    className="btn text-[10px] disabled:opacity-50"
+                  >
                     Re-open
                   </button>
                 </li>

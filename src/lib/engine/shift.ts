@@ -25,7 +25,7 @@ export function openShift(openedBy: string): Shift {
   };
   store.shifts.unshift(shift);
   store.shiftId = id;
-  store.nextOrderNumber = 1;
+  // Receipt numbers stay monotonic across shifts so tax invoices are uniquely numbered.
   recordAudit(openedBy, "shift.open", { shiftId: id });
   void persistShift(shift).catch((err) => console.error("[persist] shift failed", err));
   return shift;

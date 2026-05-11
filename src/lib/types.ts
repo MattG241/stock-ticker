@@ -76,6 +76,10 @@ export interface Order {
   idCheck: boolean;
   idempotencyKey: string | null;
   paymentChargeId: string | null;
+  cashTendered: number | null;
+  barAcked: boolean;
+  barAckedAt: string | null;
+  barAckedBy: string | null;
   createdAt: string;
   lines: OrderLine[];
 }
@@ -173,5 +177,7 @@ export type RealtimeEvent =
   | { type: "crash.tick"; payload: { remainingSeconds: number } }
   | { type: "crash.ended"; payload: { crashEventId: string; cancelledEarly: boolean } }
   | { type: "order.placed"; payload: { id: string; orderNumber: number; total: number; lineCount: number; ts: string } }
+  | { type: "order.updated"; payload: { id: string; barAcked: boolean; status: Order["status"] } }
   | { type: "drink.updated"; payload: Drink }
+  | { type: "drink.deleted"; payload: { drinkId: string } }
   | { type: "settings.updated"; payload: Settings };

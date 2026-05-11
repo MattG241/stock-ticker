@@ -12,7 +12,13 @@ const addSchema = z.object({
   tabId: z.string().min(1),
   staffId: z.string().min(1),
   items: z
-    .array(z.object({ drinkId: z.string(), quantity: z.number().int().positive().max(99) }))
+    .array(
+      z.object({
+        drinkId: z.string(),
+        quantity: z.number().int().positive().max(99),
+        expectedUnitPrice: z.number().positive().max(10_000).optional(),
+      }),
+    )
     .min(1),
 });
 
