@@ -9,7 +9,7 @@ export function Ticker({
   drinks: SnapshotDrink[];
   crash: boolean;
 }) {
-  const items = drinks.filter((d) => d.isActive);
+  const items = drinks.filter((d) => d.isActive && d.inStock);
   const row = items.map((d) => {
     const pct = ((d.currentPrice - d.basePrice) / d.basePrice) * 100;
     const up = pct >= 0;

@@ -105,9 +105,11 @@ function MainGrid({
           </div>
         )}
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {state.drinks.map((d) => (
-            <DrinkCard key={d.id} drink={d} crash={crash} />
-          ))}
+          {state.drinks
+            .filter((d) => d.inStock)
+            .map((d) => (
+              <DrinkCard key={d.id} drink={d} crash={crash} />
+            ))}
         </div>
       </main>
     </>
@@ -132,7 +134,7 @@ function Featured({ state }: { state: NonNullable<ReturnType<typeof useLiveState
     const t = setInterval(() => setIdx((i) => i + 1), 30000);
     return () => clearInterval(t);
   }, []);
-  const all = state.drinks.filter((d) => d.isActive);
+  const all = state.drinks.filter((d) => d.isActive && d.inStock);
   if (!all.length) return null;
   const start = (idx * 3) % all.length;
   const selected = [0, 1, 2].map((k) => all[(start + k) % all.length]);

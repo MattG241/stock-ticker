@@ -229,6 +229,7 @@ export default function MenuPage() {
             <th className="text-right">Cost</th>
             <th className="text-center">Dyn</th>
             <th className="text-center">Active</th>
+            <th className="text-center">Stock</th>
             <th className="text-right">Sort</th>
             <th></th>
           </tr>
@@ -268,6 +269,16 @@ export default function MenuPage() {
                   {d.isActive ? "On" : "Off"}
                 </button>
               </td>
+              <td className="text-center">
+                <button
+                  className={`btn px-2 py-0.5 ${d.inStock ? "border-bull text-bull" : "border-bear text-bear"}`}
+                  onClick={() => patch(d.id, { inStock: !d.inStock })}
+                  disabled={busyId === d.id}
+                  title={d.inStock ? "In stock - tap to 86" : "Out of stock - tap to restock"}
+                >
+                  {d.inStock ? "In" : "OUT"}
+                </button>
+              </td>
               <td className="num text-right text-ink-dim">{d.sortOrder}</td>
               <td className="text-right">
                 <div className="flex justify-end gap-1">
@@ -291,7 +302,7 @@ export default function MenuPage() {
           ))}
           {drinks.length === 0 && (
             <tr>
-              <td colSpan={10} className="py-6 text-center num text-[11px] text-ink-dim">
+              <td colSpan={11} className="py-6 text-center num text-[11px] text-ink-dim">
                 [ no drinks yet — tap "Add drink" ]
               </td>
             </tr>

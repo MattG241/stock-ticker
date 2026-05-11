@@ -20,6 +20,7 @@ const createSchema = z
     maxPriceMultiplier: z.number().positive().max(10).default(2.5),
     isDynamic: z.boolean().default(true),
     isActive: z.boolean().default(true),
+    inStock: z.boolean().default(true),
     sortOrder: z.number().int().default(0),
   })
   .refine((v) => v.maxPriceMultiplier >= v.minPriceMultiplier, {
@@ -40,6 +41,7 @@ const patchSchema = z.object({
   maxPriceMultiplier: z.number().positive().max(10).optional(),
   isDynamic: z.boolean().optional(),
   isActive: z.boolean().optional(),
+  inStock: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
 });
 
@@ -109,6 +111,7 @@ export async function POST(req: Request) {
     maxPriceMultiplier: input.maxPriceMultiplier,
     isDynamic: input.isDynamic,
     isActive: input.isActive,
+    inStock: input.inStock,
     sortOrder: input.sortOrder,
     createdAt: ts,
     updatedAt: ts,

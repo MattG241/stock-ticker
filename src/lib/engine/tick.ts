@@ -10,7 +10,7 @@ function tickOnce(): void {
   const ts = Date.now();
   const updates: { drinkId: string; currentPrice: number; ts: number }[] = [];
   for (const drink of drinks.values()) {
-    if (!drink.isDynamic || !drink.isActive) continue;
+    if (!drink.isDynamic || !drink.isActive || !drink.inStock) continue;
     const drift = (drink.basePrice - drink.currentPrice) * settings.decayRate;
     const noise = (Math.random() * 2 - 1) * drink.basePrice * settings.noiseLevel;
     const next = clamp(

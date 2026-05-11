@@ -105,6 +105,7 @@ function planLines(
     const drink = store.drinks.get(item.drinkId);
     if (!drink) return { ok: false, reason: `Unknown drink ${item.drinkId}` };
     if (!drink.isActive) return { ok: false, reason: `${drink.name} is off the menu` };
+    if (!drink.inStock) return { ok: false, reason: `${drink.name} is out of stock` };
     if (item.quantity <= 0 || !Number.isFinite(item.quantity) || !Number.isInteger(item.quantity)) {
       return { ok: false, reason: `Bad quantity for ${drink.name}` };
     }

@@ -2,7 +2,7 @@ import type { Drink } from "./types";
 import { nowIso } from "./time";
 
 export function seedDrinks(): Drink[] {
-  const base: Omit<Drink, "createdAt" | "updatedAt">[] = [
+  const base: Omit<Drink, "createdAt" | "updatedAt" | "inStock">[] = [
     { id: "espresso-martini", ticker: "ESPM", name: "Espresso Martini", category: "Cocktails", emoji: "🍸", basePrice: 22, currentPrice: 22, costPrice: 6, minPriceMultiplier: 0.5, maxPriceMultiplier: 2.5, isDynamic: true, isActive: true, sortOrder: 1 },
     { id: "negroni", ticker: "NEGR", name: "Negroni", category: "Cocktails", emoji: "🍹", basePrice: 20, currentPrice: 20, costPrice: 5, minPriceMultiplier: 0.5, maxPriceMultiplier: 2.5, isDynamic: true, isActive: true, sortOrder: 2 },
     { id: "old-fashioned", ticker: "OLDF", name: "Old Fashioned", category: "Cocktails", emoji: "🥃", basePrice: 22, currentPrice: 22, costPrice: 6, minPriceMultiplier: 0.5, maxPriceMultiplier: 2.5, isDynamic: true, isActive: true, sortOrder: 3 },
@@ -19,5 +19,5 @@ export function seedDrinks(): Drink[] {
     { id: "soda-lime", ticker: "SODA", name: "Soda and Lime", category: "Non-Alc", emoji: "🥤", basePrice: 5, currentPrice: 5, costPrice: 1, minPriceMultiplier: 1.0, maxPriceMultiplier: 1.0, isDynamic: false, isActive: true, sortOrder: 50 },
   ];
   const ts = nowIso();
-  return base.map((d) => ({ ...d, createdAt: ts, updatedAt: ts }));
+  return base.map((d) => ({ ...d, inStock: true, createdAt: ts, updatedAt: ts }));
 }

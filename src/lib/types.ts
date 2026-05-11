@@ -19,6 +19,7 @@ export interface Drink {
   maxPriceMultiplier: number;
   isDynamic: boolean;
   isActive: boolean;
+  inStock: boolean;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;

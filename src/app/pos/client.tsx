@@ -185,10 +185,10 @@ export function PosClient() {
     managerPin: string;
   } | null>(null);
 
-  const [outOfStockTarget, setOutOfStockTarget] = useState<{ id: string; name: string } | null>(
-    null,
-  );
-  const [outOfStockPin, setOutOfStockPin] = useState("");
+  const [stockTarget, setStockTarget] = useState<
+    { id: string; name: string; action: "86" | "restock" } | null
+  >(null);
+  const [stockPin, setStockPin] = useState("");
 
   const [lastOrder, setLastOrder] = useState<LastOrder | null>(null);
 
@@ -897,17 +897,16 @@ export function PosClient() {
     setToast({ kind: "ok", msg: `Comp applied: −${formatAud(amount)}` });
   };
 
-  const submitOutOfStock = async () => {
-    if (!outOfStockTarget || !outOfStockPin) {
+  const submitStockChange = async () => {
+    if (!stockTarget || !stockPin) {
       setToast({ kind: "err", msg: "Manager PIN required" });
       return;
     }
-    // Verify PIN via the auth endpoint (manager-or-above).
     try {
       const authRes = await fetch("/api/auth/pin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: outOfStockPin }),
+        body: JSON.stringify({ pin: stockPin }),
       });
       const authData = await authRes.json();
       if (
@@ -918,22 +917,28 @@ export function PosClient() {
         setToast({ kind: "err", msg: "Manager PIN required" });
         return;
       }
+      const newInStock = stockTarget.action === "restock";
       const res = await fetch("/api/drinks", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: outOfStockTarget.id, isActive: false }),
+        body: JSON.stringify({ id: stockTarget.id, inStock: newInStock }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {
-        setToast({ kind: "err", msg: data.reason ?? "Could not 86 drink" });
+        setToast({ kind: "err", msg: data.reason ?? "Update failed" });
       } else {
-        setToast({ kind: "ok", msg: `${outOfStockTarget.name} is out of stock` });
+        setToast({
+          kind: "ok",
+          msg: newInStock
+            ? `${stockTarget.name} back in stock`
+            : `${stockTarget.name} is out of stock`,
+        });
       }
     } catch {
       setToast({ kind: "err", msg: "Network error" });
     }
-    setOutOfStockTarget(null);
-    setOutOfStockPin("");
+    setStockTarget(null);
+    setStockPin("");
   };
 
   const cashRoundDelta = cartView.cashTotal - cartView.afterDiscountSubtotal;
@@ -1020,51 +1025,93 @@ export function PosClient() {
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-2 md:grid-cols-4 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {filteredDrinks.map((d) => {
             const unit = d.displayPrice;
+            const inStock = d.inStock;
             return (
               <div
                 key={d.id}
-                className="panel-tight relative flex flex-col gap-2 text-left transition active:scale-[0.98]"
+                className={`panel-tight flex flex-col gap-2 transition active:scale-[0.98] ${
+                  !inStock ? "border-bear/30 bg-bear/5" : ""
+                }`}
               >
                 <button
+                  type="button"
                   onClick={() => addToCart(d.id, d.ticker, d.name, unit)}
-                  disabled={!isOpen}
-                  className="flex w-full flex-col text-left disabled:opacity-40"
+                  disabled={!isOpen || !inStock}
+                  className="flex w-full flex-col text-left disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <div className="text-sm font-semibold leading-tight">{d.name}</div>
-                  <div className="mt-1 flex items-center justify-between">
-                    <span className="ticker-symbol">{d.ticker}</span>
-                    <span className="label">{d.category}</span>
+                  <div className="flex items-start justify-between gap-2">
+                    <div
+                      className={`min-w-0 flex-1 truncate text-sm font-semibold leading-tight ${
+                        !inStock ? "text-ink-dim" : ""
+                      }`}
+                    >
+                      {d.name}
+                    </div>
+                    {!inStock && (
+                      <span className="shrink-0 rounded-sm border border-bear/60 bg-bear/15 px-1.5 py-0 text-[9px] font-semibold uppercase tracking-[0.18em] text-bear">
+                        OUT
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 num text-[10px] uppercase tracking-[0.22em] text-ink-dim">
+                    {d.ticker} · {d.category}
                   </div>
                   <div
-                    className={`mt-2 num text-xl font-semibold ${
-                      crashActive && d.isDynamic ? "text-bear" : ""
+                    className={`mt-2 num text-2xl font-semibold ${
+                      !inStock
+                        ? "text-ink-ghost line-through"
+                        : crashActive && d.isDynamic
+                          ? "text-bear"
+                          : ""
                     }`}
                   >
                     {formatAud(unit)}
                   </div>
                 </button>
-                <div className="flex gap-1">
-                  {QTY_PRESETS.map((n) => (
+                {inStock ? (
+                  <div className="flex items-center gap-1">
+                    {QTY_PRESETS.map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          addToCart(d.id, d.ticker, d.name, unit, n);
+                        }}
+                        disabled={!isOpen}
+                        className="btn flex-1 px-0 py-1 text-[10px] disabled:opacity-40"
+                      >
+                        +{n}
+                      </button>
+                    ))}
                     <button
-                      key={n}
-                      onClick={() => addToCart(d.id, d.ticker, d.name, unit, n)}
-                      disabled={!isOpen}
-                      className="btn flex-1 px-0 py-0.5 text-[10px] disabled:opacity-40"
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStockTarget({ id: d.id, name: d.name, action: "86" });
+                      }}
+                      className="btn px-2 py-1 text-[10px] hover:border-bear hover:text-bear"
+                      title="86 - mark out of stock"
                     >
-                      +{n}
+                      86
                     </button>
-                  ))}
-                </div>
-                <button
-                  onClick={() => setOutOfStockTarget({ id: d.id, name: d.name })}
-                  className="absolute right-1 top-1 rounded-sm border border-edge px-1 py-0 text-[9px] uppercase tracking-[0.18em] text-ink-dim hover:border-bear hover:text-bear"
-                  title="86 this drink"
-                >
-                  86
-                </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setStockTarget({ id: d.id, name: d.name, action: "restock" });
+                    }}
+                    className="btn-primary w-full py-1 text-[10px]"
+                    title="Bring this drink back in stock (manager PIN)"
+                  >
+                    ↺ Restock
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1654,23 +1701,29 @@ export function PosClient() {
         </div>
       )}
 
-      {outOfStockTarget && (
+      {stockTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85">
           <div className="panel w-full max-w-sm">
-            <h3 className="label">86 · out of stock</h3>
+            <h3 className="label">
+              {stockTarget.action === "86" ? "86 · out of stock" : "Restock"}
+            </h3>
             <p className="mt-2 text-sm">
-              Mark <span className="font-semibold">{outOfStockTarget.name}</span> as out of stock?
+              {stockTarget.action === "86" ? "Mark " : "Bring "}
+              <span className="font-semibold">{stockTarget.name}</span>
+              {stockTarget.action === "86" ? " as out of stock?" : " back in stock?"}
             </p>
             <p className="mt-1 text-[10px] text-ink-dim">
-              It vanishes from POS, tickers, and display until re-enabled in admin.
+              {stockTarget.action === "86"
+                ? "Hidden from ticker and customer display. Stays visible (greyed) on POS so a manager can restock."
+                : "Re-enables price ticks and customer-facing display."}
             </p>
             <label className="mt-3 block text-xs">
               <span className="label">Manager PIN</span>
               <input
                 type="password"
                 inputMode="numeric"
-                value={outOfStockPin}
-                onChange={(e) => setOutOfStockPin(e.target.value.replace(/\D/g, ""))}
+                value={stockPin}
+                onChange={(e) => setStockPin(e.target.value.replace(/\D/g, ""))}
                 className="mt-1 w-full rounded-sm px-3 py-2 num"
                 autoFocus
               />
@@ -1678,15 +1731,18 @@ export function PosClient() {
             <div className="mt-3 flex justify-end gap-2">
               <button
                 onClick={() => {
-                  setOutOfStockTarget(null);
-                  setOutOfStockPin("");
+                  setStockTarget(null);
+                  setStockPin("");
                 }}
                 className="btn"
               >
                 Cancel
               </button>
-              <button onClick={submitOutOfStock} className="btn-danger">
-                86 it
+              <button
+                onClick={submitStockChange}
+                className={stockTarget.action === "86" ? "btn-danger" : "btn-primary"}
+              >
+                {stockTarget.action === "86" ? "86 it" : "Restock"}
               </button>
             </div>
           </div>
