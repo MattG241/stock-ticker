@@ -7,6 +7,7 @@ export default function Home() {
     { group: "Customer", href: "/display?profile=tape", label: "Display · Tape", sub: "Scrolling ticker, narrow screens" },
     { group: "Customer", href: "/display?profile=featured", label: "Display · Featured", sub: "Three drinks, 30s rotation" },
     { group: "Staff", href: "/pos", label: "Point of Sale", sub: "Staff terminal, take orders" },
+    { group: "Staff", href: "/bar", label: "Bar queue", sub: "Drinks to make, mark done" },
     { group: "Operator", href: "/admin", label: "Admin", sub: "Crashes · menu · market · audit" },
     { group: "Operator", href: "/dashboard", label: "Dashboard", sub: "Live analytics" },
   ];

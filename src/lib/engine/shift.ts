@@ -2,6 +2,7 @@ import { ulid } from "ulid";
 import { recordAudit, store } from "../store";
 import { nowIso } from "../time";
 import { roundCurrency } from "../money";
+import { persistShift } from "../db/repos";
 import type { Shift, ZReport } from "../types";
 
 export function currentShift(): Shift | null {
@@ -26,6 +27,7 @@ export function openShift(openedBy: string): Shift {
   store.shiftId = id;
   store.nextOrderNumber = 1;
   recordAudit(openedBy, "shift.open", { shiftId: id });
+  void persistShift(shift).catch((err) => console.error("[persist] shift failed", err));
   return shift;
 }
 
@@ -37,6 +39,7 @@ export function closeShift(closedBy: string): { shift: Shift; zReport: ZReport }
   shift.closedBy = closedBy;
   shift.zReport = zReport;
   recordAudit(closedBy, "shift.close", { shiftId: shift.id, revenue: zReport.revenue });
+  void persistShift(shift).catch((err) => console.error("[persist] shift failed", err));
   return { shift, zReport };
 }
 

@@ -6,169 +6,115 @@ that discount every dynamic drink for a short window.
 
 ## Build status
 
-| Phase | Brief | This repo |
-|---|---|---|
-| 1 | The Ticker | shipped |
-| 2 | Manual Crashes | shipped |
-| 3 | POS | shipped (Stripe Terminal adapter is a stub; in-memory order persistence) |
-| 4 | Admin and Dashboard | shipped (2FA pending; Inngest scheduler pending) |
-| 5 | Hardening | partial - daily summary endpoint, BAS export, operator manual, DR runbook all in; load test, Sentry, backups still TODO |
+| Phase | This repo |
+|---|---|
+| Phase 1 - The Ticker | shipped |
+| Phase 2 - Manual + scheduled crashes | shipped |
+| Phase 3 - POS | shipped (Stripe Terminal adapter wired to the real SDK; needs hardware to verify) |
+| Phase 4 - Admin and Dashboard | shipped (TOTP 2FA still pending) |
+| Phase 5 - Hardening | shipped: Postgres write-through, backup script, daily-summary cron docs, Sentry stub, idempotency, AU cash 5c rounding, ATO-compliant receipts, RSA refusal log, closing bell |
 
-See `BACKLOG.md` for the precise list of remaining items.
+`BACKLOG.md` lists everything that genuinely needs an external account before launch.
 
-## Quick start
+## Production safety checklist
+
+Before the first paying customer:
+
+- [ ] `DATABASE_URL` set to a Railway Postgres instance. Schema migrated (`npm run db:migrate`). Orders, audit, and shifts journal to Postgres on every write.
+- [ ] `PAYMENT_PROVIDER=stripe`, `STRIPE_SECRET_KEY` and `STRIPE_TERMINAL_READER_ID` set. A BBPOS WisePOS E reader is registered and tested with a $1 charge.
+- [ ] `RECEIPT_PROVIDER` set to `postmark` or `twilio`, with credentials.
+- [ ] `BUSINESS_NAME`, `BUSINESS_ABN`, `BUSINESS_ADDRESS` set so receipts are ATO-compliant tax invoices.
+- [ ] `SEED_OWNER_PIN`, `SEED_MANAGER_PIN`, `SEED_STAFF_PIN` rotated and added to Railway secrets (PINs are hashed with scrypt at rest).
+- [ ] `CRASH_WEBHOOK_TOKEN` rotated to a strong random secret.
+- [ ] `SENTRY_DSN` set; alerts route to phone.
+- [ ] An uptime monitor pings `/api/state/snapshot` every 60s.
+- [ ] Nightly Postgres backup via `scripts/backup-postgres.sh` running on Railway cron (see `docs/CRON.md`).
+- [ ] Daily summary email scheduled for 03:00 ACDT (see `docs/CRON.md`).
+- [ ] Operator has read `docs/OPERATOR_MANUAL.md`; staff have `docs/STAFF_CHEAT_SHEET.md` behind the bar.
+
+## Quick start (dev)
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open:
+Surfaces:
 
-- `/` - landing with links to every client
-- `/display?profile=main|tape|featured` - customer-facing screens
+- `/` - landing
+- `/display?profile=main|tape|featured` - customer-facing screens (load `?audio=skip` on kiosks)
 - `/pos` - staff POS
+- `/bar` - drinks queue for the person making them
 - `/admin` - admin overview
-- `/admin/crash` - manual + scheduled crashes, social webhook hint
-- `/admin/menu` - drink CRUD
-- `/admin/market` - volatility, decay, noise, margin floor, cooldown, trading hours
-- `/admin/staff` - staff and PIN management
-- `/admin/shifts` - open / close shift, Z-report, BAS CSV export
-- `/admin/audit` - immutable action ledger
-- `/dashboard` - live KPIs, top movers, revenue-per-hour chart, margin alerts
+- `/admin/crash`, `/admin/menu`, `/admin/market`, `/admin/staff`, `/admin/shifts`, `/admin/refusals`, `/admin/audit`
+- `/dashboard` - live analytics
 
-## How to test the whole system end-to-end
+## Pricing engine (src/lib/engine/)
 
-A 5 minute smoke test that exercises every Phase 1-4 feature.
+Tick every 2s, dynamic drinks only:
 
-1. **Start the server**
-   ```bash
-   npm install
-   npm run build
-   npm start
-   ```
-   Open `http://localhost:3000`.
-
-2. **Display** - open `/display?profile=main` in one window. Prices should drift every 2 seconds. Sparklines fill in. Click anywhere once to enable audio for the crash stinger.
-
-3. **POS** - open `/pos` in a second window. Sign in with PIN `1234` (staff). Tap drinks to fill the cart, type `you@example.com` into the receipt box, tap `CHARGE`. The display should visibly tick the drinks you bought.
-
-4. **Tabs** - add a few drinks, hit "Save as tab", name it. The open tab appears at the top of the POS. Tap it to resume, add more drinks, charge.
-
-5. **Manager void** - tap "Manager void" on the POS, paste an order id from a past toast, enter PIN `5678` (manager), enter a reason. Audit log records it.
-
-6. **Crash** - open `/admin/crash` in a third window. Drag the discount to 30%, duration to 60s, click `TRIGGER CRASH NOW`. Confirm. The display flashes red, plays the stinger, shows the banner with countdown; the POS cart auto-discounts; the dashboard shows margin alerts if any drink hits the floor.
-
-7. **Scheduled crash** - back on `/admin/crash`, pick a datetime ~2 minutes out, hit Schedule. Watch it fire automatically.
-
-8. **Social webhook**
-   ```bash
-   curl -X POST http://localhost:3000/api/crash/webhook/dev-webhook-token
-   ```
-   A 25% / 2 minute crash fires. Calling again within 60 seconds returns `429 rate limited`.
-
-9. **Shift close + Z-report** - open `/admin/shifts`. Click "Close shift". The Z-report appears with totals, GST, COGS estimate, per-drink counts. Console logs show the receipt-provider send.
-
-10. **BAS export** - on `/admin/shifts` click "Download BAS CSV". Open the file; every order is one row, GST broken out.
-
-11. **Daily summary** - open `/api/dashboard/daily-summary?format=html` in a browser tab. The HTML email body that goes to ownership at 03:00 ACDT.
-
-12. **Audit** - `/admin/audit` shows every state change since boot. Crashes, voids, refunds, menu edits, settings edits, shift open/close, staff create, scheduled crash fires.
-
-13. **Dashboard** - `/dashboard` should show revenue today, drinks sold, average order value, top movers with sparklines, revenue-per-hour bar chart, margin alerts, and a live order feed.
-
-14. **Offline POS** - in Chrome DevTools (POS tab), set the Network throttling to "Offline". Take an order - the toast says "Queued offline". Set the network back to "Online" - the queued order auto-sends.
-
-### Smoke test via curl
-
-```bash
-# Snapshot
-curl -s http://localhost:3000/api/state/snapshot | jq '.drinks | length'
-
-# Place an order
-curl -s -X POST http://localhost:3000/api/orders \
-  -H 'Content-Type: application/json' \
-  -d '{"staffId":"staff-1","paymentMethod":"card","items":[{"drinkId":"espresso-martini","quantity":3}]}'
-
-# Start a crash
-curl -s -X POST http://localhost:3000/api/crash \
-  -H 'Content-Type: application/json' \
-  -d '{"discountPercent":0.3,"durationSeconds":30,"triggeredBy":"admin"}'
-
-# Listen to the realtime feed
-curl -sN http://localhost:3000/api/events
 ```
-
-## Architecture
-
-Next.js 15 (App Router) with an in-process store (`src/lib/store.ts`) and a Drizzle schema
-ready to wire up to Postgres (`src/lib/db/schema.ts`). Realtime is Server-Sent Events at
-`/api/events`.
-
-### Pricing engine (`src/lib/engine/`)
-
-Tick (every 2s, dynamic drinks only):
-```
-drift   = (basePrice - currentPrice) * decayRate         // 0.04 default
-noise   = (random in [-1, +1]) * basePrice * noiseLevel  // 0.004 default
+drift   = (basePrice - currentPrice) * decayRate         // 0.04
+noise   = (random in [-1, +1]) * basePrice * noiseLevel  // 0.004
 newPrice = clamp(currentPrice + drift + noise, min, max)
 ```
 
-Order impact:
+Order impact when an order is placed:
+
 ```
-impact   = (1 + volatility) ^ quantity                   // 0.05 default
+impact   = (1 + volatility) ^ quantity                   // 0.05
 newPrice = min(currentPrice * impact, basePrice * maxMul)
 ```
 
-Crash:
+Crash discount, with a margin floor:
+
 ```
-displayPrice = max(currentPrice * (1 - discountPercent), costPrice * (1 + minMarginMultiplier))
+displayPrice = max(currentPrice * (1 - discountPercent),
+                   costPrice * (1 + minMarginMultiplier))
 ```
 
-Trading-hours hard-stop is checked on the tick engine and on order placement. Outside
-hours, dynamic prices freeze and the display shows `MARKET CLOSED`.
+Trading-hours hard-stop is checked on tick and on order placement.
+Outside hours, dynamic prices freeze and the display shows `MARKET CLOSED`.
 
-### Provider adapters
+## Provider adapters
 
-`src/lib/providers/payment.ts` and `src/lib/providers/receipt.ts` are interfaces with a
-`simulated` (dev) implementation and stub adapters for Stripe Terminal, Square, Twilio,
-and Postmark. Set the env var (e.g. `PAYMENT_PROVIDER=stripe`) and provide credentials to
-swap implementations; the order-placement code stays unchanged.
+`src/lib/providers/payment.ts` and `src/lib/providers/receipt.ts` are
+interfaces with a `simulated` dev implementation and adapters for:
 
-### Realtime events
+- Stripe Terminal (real SDK calls; needs `STRIPE_SECRET_KEY` + `STRIPE_TERMINAL_READER_ID`)
+- Square (scaffolded, not implemented)
+- Twilio SMS (scaffolded)
+- Postmark email (scaffolded)
+- Console (logs in dev)
+
+Set `PAYMENT_PROVIDER` / `RECEIPT_PROVIDER` env vars to swap.
+
+## Production-safe behaviours
+
+- **Idempotency**: every POS `POST /api/orders` carries an `idempotencyKey`. The server caches the first response keyed against it for 5 minutes, so retries after a flaky 502 do not double-charge.
+- **Cash rounding**: cash totals round to the nearest 5c (the AU convention since the 1c and 2c coin withdrawal). Card totals are exact.
+- **Tax invoices**: every receipt carries business name, ABN, address, ex-GST subtotal, GST 10%, total inc GST, and any cash adjustment.
+- **PIN hashing**: staff PINs are stored as `scrypt$salt$hash` strings. Verification uses `timingSafeEqual`.
+- **Postgres write-through**: when `DATABASE_URL` is set, orders, audit entries, and shifts journal asynchronously to Postgres after the in-memory write. The in-memory store remains the read source; Postgres is the durable log.
+- **RSA refusal log**: staff can log a refusal of service (`/pos`'s "RSA refuse" button) per Liquor Licensing Act 1997 (SA) audit requirements. Visible at `/admin/refusals`.
+- **Closing bell**: 5 minutes before `tradingClose`, the engine auto-fires a 20% / 4 minute "last call" crash. Re-arms each day.
+- **Margin floor**: enforced server-side per drink (`costPrice * (1 + minMarginMultiplier)`, default 30% margin above cost). Logged in `/admin/audit` and surfaced on the dashboard.
+
+## Realtime events
 
 `price.tick`, `price.update`, `crash.started`, `crash.tick`, `crash.ended`,
-`order.placed`, `drink.updated`, `settings.updated`. All clients fetch
-`/api/state/snapshot` first, subscribe to `/api/events`, and refetch snapshot after
-30 seconds of silence.
+`order.placed`, `drink.updated`, `settings.updated`. Clients fetch
+`/api/state/snapshot` first, subscribe to `/api/events` (SSE), and refetch
+on 30 seconds of silence.
 
-## Database
-
-In-memory in dev. For Railway production:
-
-1. Provision Postgres, set `DATABASE_URL`.
-2. `npm run db:generate && npm run db:migrate`.
-3. Wire `src/lib/store.ts` writes through to `src/lib/db/index.ts` (Drizzle schema mirrors
-   the brief: drinks, price_history, crash_events, orders, order_lines, shifts, users,
-   settings, audit_log).
-
-All currency columns are `numeric(10, 2)`. No floats anywhere.
-
-## Non-negotiables honoured
-
-- No floats for money on the API; Postgres columns are `numeric(10,2)`.
-- Snapshot-then-subscribe pattern with 30 second silence detection.
-- Crash margin floor enforced server-side, dynamically per drink based on cost.
-- Trading-hours hard-stop on tick and orders.
-- Display shows OFFLINE indicator without ever throwing.
-- 2-second tick rate set as a single constant in `settings.tickIntervalMs`.
-- Every state-changing action goes through `recordAudit`.
-- Receipts (paid orders) are immutable - only voids and refunds, never edits.
-- No em dashes in UI copy or comments.
+For multi-instance deploys, swap the in-process EventEmitter for Pusher
+Channels or Supabase Realtime; the event shapes match.
 
 ## Operator docs
 
 - `docs/OPERATOR_MANUAL.md` - daily open / run / close runbook
-- `docs/STAFF_CHEAT_SHEET.md` - one-page POS reference for staff
-- `docs/DR_RUNBOOK.md` - what to do when something is on fire
-- `BACKLOG.md` - everything explicitly NOT in this build yet
+- `docs/STAFF_CHEAT_SHEET.md` - one-page POS reference
+- `docs/DR_RUNBOOK.md` - disaster recovery
+- `docs/CRON.md` - scheduled jobs
+- `docs/screenshots/README.md` - UI gallery
+- `BACKLOG.md` - everything not yet built

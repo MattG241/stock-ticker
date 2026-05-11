@@ -8,6 +8,7 @@ const tabs = [
   { href: "/admin/market", label: "Market" },
   { href: "/admin/staff", label: "Staff" },
   { href: "/admin/shifts", label: "Shifts" },
+  { href: "/admin/refusals", label: "Refusals" },
   { href: "/admin/audit", label: "Audit" },
 ];
 

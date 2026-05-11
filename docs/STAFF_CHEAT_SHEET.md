@@ -18,9 +18,19 @@ One page. Keep this taped behind the bar.
 ## Tabs (open order for a customer who'll order more)
 
 1. Add the first round to the cart.
-2. Tap "Save as tab". Give it a name (e.g. "Sarah - bar 3").
+2. Tap "Save as tab". Type a name (e.g. "Sarah - bar 3"). Tick the "ID checked" box if you've verified photo ID.
 3. The tab appears in the "Open tabs" row at the top of the POS.
 4. When the customer comes back, tap their tab, add more drinks, then CHARGE.
+
+## RSA refusal of service
+
+If you refuse to serve anyone (intoxication, ID, behaviour), tap **RSA refuse** at the top of the POS, choose the reason, add a one-line note, and submit. This is logged for Liquor Licensing audits. Do this even if it feels obvious - it's our legal protection.
+
+## Quantity shortcuts
+
+- Tap a drink button = +1
+- Right-click (or long-press) a drink button = type a quantity
+- In the cart, you can type the exact quantity into the number field, or use +4 / +6 / +8 shortcut buttons for a round.
 
 ## Voiding
 

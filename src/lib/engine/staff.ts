@@ -1,6 +1,7 @@
 import { ulid } from "ulid";
 import { recordAudit, store } from "../store";
 import { nowIso } from "../time";
+import { hashPin, verifyPin } from "../crypto";
 import type { StaffMember, StaffRole } from "../types";
 
 export function listStaff(): StaffMember[] {
@@ -9,7 +10,7 @@ export function listStaff(): StaffMember[] {
 
 export function findStaffByPin(pin: string): StaffMember | null {
   for (const s of store.staff.values()) {
-    if (s.isActive && s.pin === pin) return s;
+    if (s.isActive && verifyPin(pin, s.pinHash)) return s;
   }
   return null;
 }
@@ -34,7 +35,7 @@ export function upsertStaff(input: {
     id,
     name: input.name,
     email: input.email,
-    pin: input.pin,
+    pinHash: hashPin(input.pin),
     role: input.role,
     isActive: input.isActive,
     createdAt: existing?.createdAt ?? nowIso(),

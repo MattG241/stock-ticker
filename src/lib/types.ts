@@ -63,6 +63,7 @@ export interface Order {
   subtotal: number;
   gstAmount: number;
   total: number;
+  cashAdjustment: number;
   crashEventId: string | null;
   crashDiscount: number;
   paymentMethod: "card" | "cash" | "split";
@@ -72,6 +73,9 @@ export interface Order {
   refundedAt: string | null;
   refundAmount: number;
   notes: string | null;
+  idCheck: boolean;
+  idempotencyKey: string | null;
+  paymentChargeId: string | null;
   createdAt: string;
   lines: OrderLine[];
 }
@@ -105,10 +109,18 @@ export interface StaffMember {
   id: string;
   name: string;
   email: string;
-  pin: string;
+  pinHash: string;
   role: StaffRole;
   isActive: boolean;
   createdAt: string;
+}
+
+export interface RefusalEntry {
+  id: string;
+  ts: string;
+  staffId: string;
+  reason: "intoxication" | "id" | "behaviour" | "other";
+  notes: string;
 }
 
 export interface Shift {

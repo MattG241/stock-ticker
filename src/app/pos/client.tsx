@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLiveState } from "@/lib/hooks/useLiveState";
-import { formatAud } from "@/lib/money";
+import { formatAud, roundCashAud } from "@/lib/money";
 import { Logo } from "@/components/Logo";
 
 interface CartLine {
@@ -20,6 +20,8 @@ interface QueuedOrder {
     items: { drinkId: string; quantity: number }[];
     tabId?: string;
     receipt?: { channel: "email" | "sms"; to: string };
+    idempotencyKey: string;
+    idCheck?: boolean;
   };
   attemptCount: number;
 }
@@ -33,6 +35,11 @@ interface Tab {
 }
 
 const QUEUE_KEY = "drink-exchange-pos-queue";
+const QTY_PRESETS = [4, 6, 8];
+
+function newIdempotencyKey() {
+  return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export function PosClient() {
   const { state, refresh } = useLiveState();
@@ -51,6 +58,14 @@ export function PosClient() {
   const [voidPin, setVoidPin] = useState("");
   const [voidTarget, setVoidTarget] = useState<string | null>(null);
   const [voidReason, setVoidReason] = useState("");
+  const [search, setSearch] = useState("");
+  const [tabModal, setTabModal] = useState(false);
+  const [tabName, setTabName] = useState("");
+  const [tabIdCheck, setTabIdCheck] = useState(false);
+  const [refusalOpen, setRefusalOpen] = useState(false);
+  const [refusalReason, setRefusalReason] = useState<"intoxication" | "id" | "behaviour" | "other">("intoxication");
+  const [refusalNotes, setRefusalNotes] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -124,7 +139,7 @@ export function PosClient() {
   const floor = state?.settings.minMarginMultiplier ?? 0.3;
 
   const cartView = useMemo(() => {
-    if (!state) return { lines: [] as (CartLine & { liveUnit: number; lineTotal: number })[], subtotal: 0 };
+    if (!state) return { lines: [] as (CartLine & { liveUnit: number; lineTotal: number })[], subtotal: 0, cashTotal: 0 };
     const lines = cart.map((l) => {
       const d = state.drinks.find((x) => x.id === l.drinkId);
       const live = d
@@ -136,8 +151,21 @@ export function PosClient() {
       return { ...l, liveUnit, lineTotal: Math.round(liveUnit * l.quantity * 100) / 100 };
     });
     const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
-    return { lines, subtotal: Math.round(subtotal * 100) / 100 };
+    const rounded = Math.round(subtotal * 100) / 100;
+    return { lines, subtotal: rounded, cashTotal: roundCashAud(rounded) };
   }, [cart, state, crashActive, discount, floor]);
+
+  const filteredDrinks = useMemo(() => {
+    if (!state) return [];
+    const q = search.trim().toLowerCase();
+    if (!q) return state.drinks;
+    return state.drinks.filter(
+      (d) =>
+        d.name.toLowerCase().includes(q) ||
+        d.ticker.toLowerCase().includes(q) ||
+        d.category.toLowerCase().includes(q),
+    );
+  }, [state, search]);
 
   if (!staffId) {
     return (
@@ -173,9 +201,6 @@ export function PosClient() {
           />
           <button className="btn-primary mt-3 w-full">Sign in</button>
           {pinError && <p className="mt-3 text-xs uppercase tracking-[0.18em] text-bear">{pinError}</p>}
-          <p className="mt-6 text-[10px] uppercase tracking-[0.18em] text-ink-dim">
-            Dev PINs · STAFF 1234 · MGR 5678 · OWN 9999
-          </p>
         </form>
       </main>
     );
@@ -183,12 +208,20 @@ export function PosClient() {
 
   if (!state) return <div className="p-10 text-ink-dim">Connecting...</div>;
 
-  const addToCart = (drinkId: string, ticker: string, name: string, unit: number) => {
+  const addToCart = (drinkId: string, ticker: string, name: string, unit: number, qty = 1) => {
     setCart((c) => {
       const ex = c.find((l) => l.drinkId === drinkId);
-      if (ex) return c.map((l) => (l.drinkId === drinkId ? { ...l, quantity: l.quantity + 1 } : l));
-      return [...c, { drinkId, ticker, name, unit, quantity: 1 }];
+      if (ex) return c.map((l) => (l.drinkId === drinkId ? { ...l, quantity: l.quantity + qty } : l));
+      return [...c, { drinkId, ticker, name, unit, quantity: qty }];
     });
+  };
+
+  const setQuantity = (drinkId: string, qty: number) => {
+    if (qty <= 0) {
+      setCart((c) => c.filter((l) => l.drinkId !== drinkId));
+    } else {
+      setCart((c) => c.map((l) => (l.drinkId === drinkId ? { ...l, quantity: qty } : l)));
+    }
   };
 
   const charge = async () => {
@@ -202,6 +235,7 @@ export function PosClient() {
       receipt: receiptTo
         ? { channel: receiptTo.includes("@") ? ("email" as const) : ("sms" as const), to: receiptTo }
         : undefined,
+      idempotencyKey: newIdempotencyKey(),
     };
     try {
       if (!online) throw new Error("offline");
@@ -239,34 +273,39 @@ export function PosClient() {
 
   const saveAsTab = async () => {
     if (!cartView.lines.length) return;
-    const tabName = prompt("Tab name (e.g. Sarah - bar 3)") || "Tab";
+    setTabModal(true);
+  };
+
+  const submitTab = async () => {
+    const name = tabName.trim() || "Tab";
     const res = await fetch("/api/tabs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ staffId, tabName }),
+      body: JSON.stringify({ staffId, tabName: name }),
     });
     const data = await res.json();
     if (!res.ok || !data.ok) {
       setToast({ kind: "err", msg: data.reason ?? "Could not open tab" });
+      setTabModal(false);
       return;
     }
-    const addRes = await fetch("/api/tabs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "add",
-        tabId: data.order.id,
-        staffId,
-        items: cartView.lines.map((l) => ({ drinkId: l.drinkId, quantity: l.quantity })),
-      }),
-    });
-    const addData = await addRes.json();
-    if (!addRes.ok || !addData.ok) {
-      setToast({ kind: "err", msg: addData.reason ?? "Could not add to tab" });
-      return;
+    if (cartView.lines.length) {
+      await fetch("/api/tabs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add",
+          tabId: data.order.id,
+          staffId,
+          items: cartView.lines.map((l) => ({ drinkId: l.drinkId, quantity: l.quantity })),
+        }),
+      });
     }
-    setToast({ kind: "ok", msg: `Tab "${tabName}" opened` });
+    setToast({ kind: "ok", msg: `Tab "${name}" opened · ID ${tabIdCheck ? "checked" : "NOT checked"}` });
     setCart([]);
+    setTabName("");
+    setTabIdCheck(false);
+    setTabModal(false);
   };
 
   const resumeTab = (tab: Tab) => {
@@ -293,16 +332,39 @@ export function PosClient() {
     setVoidReason("");
   };
 
+  const submitRefusal = async () => {
+    const refusalPin = prompt("Your PIN to log refusal");
+    if (!refusalPin) return;
+    const res = await fetch("/api/refusal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: refusalPin, reason: refusalReason, notes: refusalNotes || "—" }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      setToast({ kind: "err", msg: data.reason ?? "Refusal logging failed" });
+    } else {
+      setToast({ kind: "ok", msg: "Refusal logged" });
+      setRefusalNotes("");
+    }
+    setRefusalOpen(false);
+  };
+
   return (
     <main className="grid h-screen grid-cols-[1fr_22rem] bg-bg">
       <section className="overflow-y-auto p-3">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <Logo size={18} />
+          <input
+            ref={searchRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search drinks..."
+            className="flex-1 max-w-xs rounded-sm px-3 py-1.5 text-xs"
+          />
           <div className="flex items-center gap-2">
             {!online && (
-              <span className="pill border-amber/40 text-amber">
-                Offline · queued {queue.length}
-              </span>
+              <span className="pill border-amber/40 text-amber">Offline · queued {queue.length}</span>
             )}
             {state.connectionStatus !== "live" && online && (
               <span className="pill border-amber/40 text-amber">
@@ -314,9 +376,8 @@ export function PosClient() {
                 Crash {Math.round(discount * 100)}%
               </span>
             )}
-            <button className="btn" onClick={() => setStaffId(null)}>
-              Sign out
-            </button>
+            <button className="btn" onClick={() => setRefusalOpen(true)}>RSA refuse</button>
+            <button className="btn" onClick={() => setStaffId(null)}>Sign out</button>
           </div>
         </div>
 
@@ -338,25 +399,38 @@ export function PosClient() {
         )}
 
         <div className="grid grid-cols-3 gap-2 md:grid-cols-4 lg:grid-cols-5">
-          {state.drinks.map((d) => {
+          {filteredDrinks.map((d) => {
             const unit = d.displayPrice;
             return (
               <button
                 key={d.id}
                 onClick={() => addToCart(d.id, d.ticker, d.name, unit)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  const q = prompt(`Add how many ${d.name}?`, "4");
+                  if (q) {
+                    const n = parseInt(q, 10);
+                    if (n > 0) addToCart(d.id, d.ticker, d.name, unit, n);
+                  }
+                }}
                 className="panel-tight text-left transition active:scale-[0.98] hover:border-edge-bright"
               >
-                <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold leading-tight">{d.name}</div>
+                <div className="mt-1 flex items-center justify-between">
                   <span className="ticker-symbol">{d.ticker}</span>
                   <span className="label">{d.category}</span>
                 </div>
-                <div className="mt-2 text-xs leading-tight text-ink/80">{d.name}</div>
                 <div className={`mt-2 num text-xl font-semibold ${crashActive && d.isDynamic ? "text-bear" : ""}`}>
                   {formatAud(unit)}
                 </div>
               </button>
             );
           })}
+          {filteredDrinks.length === 0 && (
+            <div className="col-span-full num text-[11px] uppercase tracking-[0.18em] text-ink-dim">
+              [ no drinks match &ldquo;{search}&rdquo; ]
+            </div>
+          )}
         </div>
       </section>
 
@@ -365,7 +439,10 @@ export function PosClient() {
           <h2 className="label text-ink">
             Cart {activeTabId && <span className="ml-2 text-bull">· on tab</span>}
           </h2>
-          <button className="text-[10px] uppercase tracking-[0.18em] text-ink-dim hover:text-bear" onClick={() => { setCart([]); setActiveTabId(null); }}>
+          <button
+            className="text-[10px] uppercase tracking-[0.18em] text-ink-dim hover:text-bear"
+            onClick={() => { setCart([]); setActiveTabId(null); }}
+          >
             clear
           </button>
         </div>
@@ -388,29 +465,33 @@ export function PosClient() {
                   <div className="flex items-center gap-1">
                     <button
                       className="btn px-2 py-0.5"
-                      onClick={() =>
-                        setCart((c) =>
-                          c.map((x) =>
-                            x.drinkId === l.drinkId ? { ...x, quantity: x.quantity - 1 } : x,
-                          ).filter((x) => x.quantity > 0),
-                        )
-                      }
+                      onClick={() => setQuantity(l.drinkId, l.quantity - 1)}
                     >
                       -
                     </button>
-                    <span className="num w-6 text-center">{l.quantity}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={99}
+                      value={l.quantity}
+                      onChange={(e) => setQuantity(l.drinkId, parseInt(e.target.value, 10) || 0)}
+                      className="w-10 rounded-sm px-1 py-0.5 num text-center"
+                    />
                     <button
                       className="btn px-2 py-0.5"
-                      onClick={() =>
-                        setCart((c) =>
-                          c.map((x) =>
-                            x.drinkId === l.drinkId ? { ...x, quantity: x.quantity + 1 } : x,
-                          ),
-                        )
-                      }
+                      onClick={() => setQuantity(l.drinkId, l.quantity + 1)}
                     >
                       +
                     </button>
+                    {QTY_PRESETS.map((n) => (
+                      <button
+                        key={n}
+                        className="btn px-1.5 py-0.5"
+                        onClick={() => setQuantity(l.drinkId, l.quantity + n)}
+                      >
+                        +{n}
+                      </button>
+                    ))}
                   </div>
                   <div className={`num ${moved ? "text-amber" : "text-ink-dim"}`}>
                     {moved && "MOVED · "}{formatAud(l.liveUnit)}/u
@@ -426,6 +507,12 @@ export function PosClient() {
             <span>Subtotal · inc GST</span>
             <span className="num text-base font-semibold text-ink">{formatAud(cartView.subtotal)}</span>
           </div>
+          {paymentMethod === "cash" && cartView.cashTotal !== cartView.subtotal && (
+            <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-amber">
+              <span>Cash · 5c round</span>
+              <span className="num">{formatAud(cartView.cashTotal)}</span>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setPaymentMethod("card")}
@@ -448,7 +535,7 @@ export function PosClient() {
             className="w-full rounded-sm px-3 py-2 text-xs"
           />
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={saveAsTab} disabled={!cartView.lines.length} className="btn">
+            <button onClick={saveAsTab} className="btn">
               Save as tab
             </button>
             <button
@@ -456,7 +543,7 @@ export function PosClient() {
               disabled={charging || !cartView.lines.length}
               className="btn-primary"
             >
-              {charging ? "Charging..." : `Charge ${formatAud(cartView.subtotal)}`}
+              {charging ? "Charging..." : `Charge ${formatAud(paymentMethod === "cash" ? cartView.cashTotal : cartView.subtotal)}`}
             </button>
           </div>
           <button
@@ -473,11 +560,37 @@ export function PosClient() {
               {toast.msg}
             </p>
           )}
-          <p className="text-[10px] uppercase tracking-[0.18em] text-ink-dim">
-            Payment provider · simulated
-          </p>
         </div>
       </aside>
+
+      {tabModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85">
+          <div className="panel w-full max-w-sm">
+            <h3 className="label">Open tab</h3>
+            <input
+              type="text"
+              value={tabName}
+              onChange={(e) => setTabName(e.target.value)}
+              placeholder="Customer name or bar position"
+              autoFocus
+              className="mt-3 w-full rounded-sm px-3 py-2 text-sm"
+            />
+            <label className="mt-3 flex items-center gap-2 text-xs text-ink-dim">
+              <input
+                type="checkbox"
+                checked={tabIdCheck}
+                onChange={(e) => setTabIdCheck(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              I have checked photo ID on this customer
+            </label>
+            <div className="mt-3 flex justify-end gap-2">
+              <button onClick={() => setTabModal(false)} className="btn">Cancel</button>
+              <button onClick={submitTab} className="btn-primary">Open</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {voidTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85">
@@ -501,6 +614,39 @@ export function PosClient() {
             <div className="mt-3 flex justify-end gap-2">
               <button onClick={() => setVoidTarget(null)} className="btn">Cancel</button>
               <button onClick={voidOrder} className="btn-danger">Void</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {refusalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85">
+          <div className="panel w-full max-w-sm">
+            <h3 className="label">RSA refusal of service</h3>
+            <label className="mt-3 block text-xs">
+              <span className="label">Reason</span>
+              <select
+                value={refusalReason}
+                onChange={(e) => setRefusalReason(e.target.value as typeof refusalReason)}
+                className="mt-1 w-full rounded-sm px-3 py-2 text-sm"
+              >
+                <option value="intoxication">Intoxication</option>
+                <option value="id">ID issue / minor</option>
+                <option value="behaviour">Behaviour</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <textarea
+              value={refusalNotes}
+              onChange={(e) => setRefusalNotes(e.target.value)}
+              placeholder="Notes for the audit log..."
+              className="mt-2 w-full rounded-sm px-3 py-2 text-xs"
+              rows={3}
+              style={{ background: "#10161D", border: "1px solid #1A2027", color: "#E6E8EB" }}
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button onClick={() => setRefusalOpen(false)} className="btn">Cancel</button>
+              <button onClick={submitRefusal} className="btn-danger">Log refusal</button>
             </div>
           </div>
         </div>

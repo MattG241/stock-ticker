@@ -7,6 +7,7 @@ import type {
   Order,
   PricePoint,
   RealtimeEvent,
+  RefusalEntry,
   ScheduledCrash,
   Settings,
   Shift,
@@ -14,6 +15,7 @@ import type {
 } from "./types";
 import { seedDrinks } from "./seed";
 import { nowIso } from "./time";
+import { hashPin } from "./crypto";
 
 const HISTORY_CAP = 2000;
 const SPARK_WINDOW = 25;
@@ -32,12 +34,16 @@ export interface Store {
   staff: Map<string, StaffMember>;
   scheduledCrashes: ScheduledCrash[];
   marginAlerts: Map<string, MarginAlert>;
+  refusals: RefusalEntry[];
+  idempotency: Map<string, { orderId: string; ts: number }>;
+  recentSales: { id: string; ticker: string; name: string; quantity: number; total: number; ts: number }[];
   socialWebhookToken: string;
   socialWebhookCooldownAt: number;
   emitter: EventEmitter;
   tickStarted: boolean;
   scheduleStarted: boolean;
   alertsStarted: boolean;
+  bellArmed: boolean;
   crashTimer: NodeJS.Timeout | null;
 }
 
@@ -71,11 +77,14 @@ function createStore(): Store {
   const shiftId = `shift-${ts}`;
   const staff = new Map<string, StaffMember>();
   const now = new Date(ts).toISOString();
+  const ownerPin = process.env.SEED_OWNER_PIN ?? "9999";
+  const managerPin = process.env.SEED_MANAGER_PIN ?? "5678";
+  const staffPin = process.env.SEED_STAFF_PIN ?? "1234";
   staff.set("owner-1", {
     id: "owner-1",
     name: "Owner",
     email: "owner@thedrinkexchange.com.au",
-    pin: "9999",
+    pinHash: hashPin(ownerPin),
     role: "owner",
     isActive: true,
     createdAt: now,
@@ -84,7 +93,7 @@ function createStore(): Store {
     id: "manager-1",
     name: "Manager",
     email: "manager@thedrinkexchange.com.au",
-    pin: "5678",
+    pinHash: hashPin(managerPin),
     role: "manager",
     isActive: true,
     createdAt: now,
@@ -93,7 +102,7 @@ function createStore(): Store {
     id: "staff-1",
     name: "Staff",
     email: "staff@thedrinkexchange.com.au",
-    pin: "1234",
+    pinHash: hashPin(staffPin),
     role: "staff",
     isActive: true,
     createdAt: now,
@@ -112,12 +121,16 @@ function createStore(): Store {
     staff,
     scheduledCrashes: [],
     marginAlerts: new Map(),
+    refusals: [],
+    idempotency: new Map(),
+    recentSales: [],
     socialWebhookToken: process.env.CRASH_WEBHOOK_TOKEN ?? "dev-webhook-token",
     socialWebhookCooldownAt: 0,
     emitter,
     tickStarted: false,
     scheduleStarted: false,
     alertsStarted: false,
+    bellArmed: false,
     crashTimer: null,
   };
 }
@@ -135,14 +148,19 @@ export function broadcast(evt: RealtimeEvent): void {
 }
 
 export function recordAudit(actor: string, action: string, detail: Record<string, unknown>): void {
-  store.audit.unshift({
+  const entry = {
     id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     ts: nowIso(),
     actor,
     action,
     detail,
-  });
+  };
+  store.audit.unshift(entry);
   if (store.audit.length > 1000) store.audit.length = 1000;
+  // Async write-through to Postgres journal if DATABASE_URL is set.
+  void import("./db/repos")
+    .then((m) => m.persistAudit(entry))
+    .catch((err) => console.error("[persist] audit failed", err));
 }
 
 export function pushHistory(drinkId: string, ts: number, price: number): void {

@@ -6,16 +6,38 @@ import { DisplayHeader } from "@/components/DisplayHeader";
 import { Ticker } from "@/components/Ticker";
 import { DrinkCard } from "@/components/DrinkCard";
 import { CrashOverlay } from "@/components/CrashOverlay";
+import { JustSoldStrip } from "@/components/JustSoldStrip";
+import { BiggestMoverCallout } from "@/components/BiggestMover";
 import { formatAud, pctChange } from "@/lib/money";
 import { Sparkline } from "@/components/Sparkline";
 
 type Profile = "main" | "tape" | "featured";
 
+const AUDIO_KEY = "drink-exchange-audio-armed";
+
 export function DisplayClient() {
   const params = useSearchParams();
   const profile = (params.get("profile") as Profile | null) ?? "main";
+  const audioParam = params.get("audio");
   const { state } = useLiveState();
   const [audioArmed, setAudioArmed] = useState(false);
+
+  useEffect(() => {
+    if (audioParam === "skip") {
+      setAudioArmed(true);
+      return;
+    }
+    if (typeof window !== "undefined" && window.localStorage.getItem(AUDIO_KEY) === "1") {
+      setAudioArmed(true);
+    }
+  }, [audioParam]);
+
+  const armAudio = () => {
+    setAudioArmed(true);
+    try {
+      window.localStorage.setItem(AUDIO_KEY, "1");
+    } catch {}
+  };
 
   if (!state) {
     return (
@@ -33,10 +55,10 @@ export function DisplayClient() {
     <div className="display-scanlines min-h-screen bg-bg">
       {!audioArmed && (
         <button
-          onClick={() => setAudioArmed(true)}
+          onClick={armAudio}
           className="fixed inset-0 z-[60] flex items-center justify-center bg-bg/90 text-xs uppercase tracking-[0.32em] text-ink-dim hover:text-ink"
         >
-          [ tap to enable audio ]
+          [ tap to enable audio · or load ?audio=skip ]
         </button>
       )}
       <CrashOverlay active={crashActive} discountPercent={discount} remainingSeconds={remaining} />
@@ -66,19 +88,23 @@ function MainGrid({
   crash: boolean;
 }) {
   return (
-    <main className="px-6 py-4">
-      {!state.tradingOpen && (
-        <div className="panel mb-3 border-amber/40 text-amber">
-          <span className="label text-amber">Market closed</span>
-          <p className="mt-1 text-sm">Last-known prices shown. Opens at {state.settings.tradingOpen}.</p>
+    <>
+      <JustSoldStrip />
+      <main className="px-6 py-3 space-y-3">
+        <BiggestMoverCallout />
+        {!state.tradingOpen && (
+          <div className="panel border-amber/40 text-amber">
+            <span className="label text-amber">Market closed</span>
+            <p className="mt-1 text-sm">Last-known prices shown. Opens at {state.settings.tradingOpen}.</p>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {state.drinks.map((d) => (
+            <DrinkCard key={d.id} drink={d} crash={crash} />
+          ))}
         </div>
-      )}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {state.drinks.map((d) => (
-          <DrinkCard key={d.id} drink={d} crash={crash} />
-        ))}
-      </div>
-    </main>
+      </main>
+    </>
   );
 }
 
@@ -113,12 +139,14 @@ function Featured({ state }: { state: NonNullable<ReturnType<typeof useLiveState
         const change = d.currentPrice - d.basePrice;
         return (
           <div key={d.id} className="panel relative flex aspect-square flex-col justify-between">
-            <div className="flex items-start justify-between">
-              <span className="ticker-symbol-lg">{d.ticker}</span>
-              <span className="label">{d.category}</span>
+            <div>
+              <div className="text-xl font-semibold leading-tight">{d.name}</div>
+              <div className="mt-2 flex items-center gap-2">
+                <span className="ticker-symbol-lg">{d.ticker}</span>
+                <span className="label">{d.category}</span>
+              </div>
             </div>
             <div className="flex flex-col items-start gap-1">
-              <span className="text-xs uppercase tracking-[0.24em] text-ink-dim">{d.name}</span>
               {crash && d.isDynamic ? (
                 <>
                   <span className="num text-base text-ink-ghost line-through">{formatAud(d.currentPrice)}</span>
