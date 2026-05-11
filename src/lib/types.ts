@@ -98,6 +98,61 @@ export interface AuditEntry {
   detail: Record<string, unknown>;
 }
 
+export type StaffRole = "staff" | "manager" | "admin" | "owner";
+
+export interface StaffMember {
+  id: string;
+  name: string;
+  email: string;
+  pin: string;
+  role: StaffRole;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface Shift {
+  id: string;
+  openedAt: string;
+  closedAt: string | null;
+  openedBy: string;
+  closedBy: string | null;
+  zReport?: ZReport;
+}
+
+export interface ZReport {
+  shiftId: string;
+  openedAt: string;
+  closedAt: string;
+  orders: number;
+  revenue: number;
+  gst: number;
+  subtotalExGst: number;
+  cogsEstimate: number;
+  drinkCounts: Record<string, { name: string; count: number; revenue: number }>;
+  crashCount: number;
+  crashRevenue: number;
+  voids: number;
+  refunds: number;
+  paymentBreakdown: Record<string, { count: number; total: number }>;
+}
+
+export interface ScheduledCrash {
+  id: string;
+  fireAt: string;
+  discountPercent: number;
+  durationSeconds: number;
+  label?: string;
+  fired: boolean;
+  cancelled: boolean;
+}
+
+export interface MarginAlert {
+  drinkId: string;
+  drinkName: string;
+  enteredAt: string;
+  floor: number;
+}
+
 export type RealtimeEvent =
   | { type: "price.tick"; payload: { drinkId: string; currentPrice: number; ts: number }[] }
   | { type: "price.update"; payload: { drinkId: string; currentPrice: number; ts: number }[] }

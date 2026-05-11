@@ -3,10 +3,14 @@ import type {
   AuditEntry,
   CrashEvent,
   Drink,
+  MarginAlert,
   Order,
   PricePoint,
   RealtimeEvent,
+  ScheduledCrash,
   Settings,
+  Shift,
+  StaffMember,
 } from "./types";
 import { seedDrinks } from "./seed";
 import { nowIso } from "./time";
@@ -22,10 +26,18 @@ export interface Store {
   orders: Order[];
   audit: AuditEntry[];
   settings: Settings;
+  shifts: Shift[];
   shiftId: string;
   nextOrderNumber: number;
+  staff: Map<string, StaffMember>;
+  scheduledCrashes: ScheduledCrash[];
+  marginAlerts: Map<string, MarginAlert>;
+  socialWebhookToken: string;
+  socialWebhookCooldownAt: number;
   emitter: EventEmitter;
   tickStarted: boolean;
+  scheduleStarted: boolean;
+  alertsStarted: boolean;
   crashTimer: NodeJS.Timeout | null;
 }
 
@@ -56,6 +68,36 @@ function createStore(): Store {
   }
   const emitter = new EventEmitter();
   emitter.setMaxListeners(200);
+  const shiftId = `shift-${ts}`;
+  const staff = new Map<string, StaffMember>();
+  const now = new Date(ts).toISOString();
+  staff.set("owner-1", {
+    id: "owner-1",
+    name: "Owner",
+    email: "owner@thedrinkexchange.com.au",
+    pin: "9999",
+    role: "owner",
+    isActive: true,
+    createdAt: now,
+  });
+  staff.set("manager-1", {
+    id: "manager-1",
+    name: "Manager",
+    email: "manager@thedrinkexchange.com.au",
+    pin: "5678",
+    role: "manager",
+    isActive: true,
+    createdAt: now,
+  });
+  staff.set("staff-1", {
+    id: "staff-1",
+    name: "Staff",
+    email: "staff@thedrinkexchange.com.au",
+    pin: "1234",
+    role: "staff",
+    isActive: true,
+    createdAt: now,
+  });
   return {
     drinks,
     history,
@@ -64,10 +106,18 @@ function createStore(): Store {
     orders: [],
     audit: [],
     settings: defaultSettings(),
-    shiftId: `shift-${ts}`,
+    shifts: [{ id: shiftId, openedAt: now, closedAt: null, openedBy: "system", closedBy: null }],
+    shiftId,
     nextOrderNumber: 1,
+    staff,
+    scheduledCrashes: [],
+    marginAlerts: new Map(),
+    socialWebhookToken: process.env.CRASH_WEBHOOK_TOKEN ?? "dev-webhook-token",
+    socialWebhookCooldownAt: 0,
     emitter,
     tickStarted: false,
+    scheduleStarted: false,
+    alertsStarted: false,
     crashTimer: null,
   };
 }

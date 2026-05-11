@@ -15,7 +15,12 @@ const schema = z.object({
         quantity: z.number().int().positive().max(99),
       }),
     )
-    .min(1),
+    .default([]),
+  tabId: z.string().optional(),
+  receipt: z
+    .object({ channel: z.enum(["email", "sms"]), to: z.string().min(1) })
+    .optional(),
+  idempotencyKey: z.string().optional(),
 });
 
 export const dynamic = "force-dynamic";
@@ -26,7 +31,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ ok: false, reason: "Bad payload" }, { status: 400 });
   }
-  const result = placeOrder(parsed.data);
+  const result = await placeOrder(parsed.data);
   if (!result.ok) return NextResponse.json(result, { status: 422 });
   return NextResponse.json({ ok: true, order: result.order });
 }

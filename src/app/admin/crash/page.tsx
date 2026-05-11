@@ -13,20 +13,41 @@ interface CrashRecord {
   totalRevenueDuringCrash: number;
 }
 
+interface Schedule {
+  id: string;
+  fireAt: string;
+  discountPercent: number;
+  durationSeconds: number;
+  label?: string;
+  fired: boolean;
+  cancelled: boolean;
+}
+
 export default function CrashCentre() {
   const { state } = useLiveState();
   const [discount, setDiscount] = useState(0.3);
   const [duration, setDuration] = useState(180);
   const [history, setHistory] = useState<CrashRecord[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [scheduleAt, setScheduleAt] = useState<string>("");
+  const [scheduleDiscount, setScheduleDiscount] = useState(0.25);
+  const [scheduleDuration, setScheduleDuration] = useState(180);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
 
   const refreshHistory = async () => {
-    const res = await fetch("/api/crash", { cache: "no-store" });
-    if (res.ok) {
-      const data = (await res.json()) as { history: CrashRecord[] };
+    const [crashRes, schedRes] = await Promise.all([
+      fetch("/api/crash", { cache: "no-store" }),
+      fetch("/api/crash/schedule", { cache: "no-store" }),
+    ]);
+    if (crashRes.ok) {
+      const data = (await crashRes.json()) as { history: CrashRecord[] };
       setHistory(data.history ?? []);
+    }
+    if (schedRes.ok) {
+      const data = (await schedRes.json()) as { schedules: Schedule[] };
+      setSchedules(data.schedules ?? []);
     }
   };
 
@@ -35,6 +56,28 @@ export default function CrashCentre() {
     const t = setInterval(refreshHistory, 5000);
     return () => clearInterval(t);
   }, []);
+
+  const addSchedule = async () => {
+    if (!scheduleAt) return;
+    const fireAt = new Date(scheduleAt).toISOString();
+    const res = await fetch("/api/crash/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fireAt,
+        discountPercent: scheduleDiscount,
+        durationSeconds: scheduleDuration,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) setMsg(data.reason ?? "Failed");
+    refreshHistory();
+  };
+
+  const cancelSchedule = async (id: string) => {
+    await fetch(`/api/crash/schedule?id=${id}`, { method: "DELETE" });
+    refreshHistory();
+  };
 
   const trigger = async () => {
     setBusy(true);
@@ -115,6 +158,72 @@ export default function CrashCentre() {
           )}
           {msg && <span className="text-sm text-ink-dim">{msg}</span>}
         </div>
+      </section>
+
+      <section className="card">
+        <h2 className="text-sm font-semibold uppercase tracking-widest text-ink-dim">Scheduled crashes</h2>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
+          <input
+            type="datetime-local"
+            value={scheduleAt}
+            onChange={(e) => setScheduleAt(e.target.value)}
+            className="rounded-lg border border-edge bg-bg-elev px-3 py-2 num text-sm"
+          />
+          <label className="text-sm">
+            <span className="text-xs uppercase tracking-widest text-ink-dim">Discount</span>
+            <input
+              type="number"
+              step="0.05"
+              min={0.05}
+              max={0.9}
+              value={scheduleDiscount}
+              onChange={(e) => setScheduleDiscount(parseFloat(e.target.value))}
+              className="mt-1 w-full rounded-lg border border-edge bg-bg-elev px-3 py-2 num"
+            />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs uppercase tracking-widest text-ink-dim">Duration (s)</span>
+            <input
+              type="number"
+              min={10}
+              max={600}
+              value={scheduleDuration}
+              onChange={(e) => setScheduleDuration(parseInt(e.target.value, 10) || 0)}
+              className="mt-1 w-full rounded-lg border border-edge bg-bg-elev px-3 py-2 num"
+            />
+          </label>
+          <button onClick={addSchedule} className="btn-primary">Schedule</button>
+        </div>
+        {schedules.length === 0 ? (
+          <p className="mt-3 text-sm text-ink-dim">No scheduled crashes.</p>
+        ) : (
+          <table className="mt-3 w-full text-sm">
+            <thead className="text-left text-xs uppercase tracking-wider text-ink-dim">
+              <tr><th>Fire at</th><th>Discount</th><th>Duration</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+              {schedules.map((s) => (
+                <tr key={s.id} className="border-t border-edge">
+                  <td className="num py-1">{new Date(s.fireAt).toLocaleString("en-AU")}</td>
+                  <td className="num">{Math.round(s.discountPercent * 100)}%</td>
+                  <td className="num">{s.durationSeconds}s</td>
+                  <td>{s.cancelled ? "cancelled" : s.fired ? "fired" : "pending"}</td>
+                  <td className="text-right">
+                    {!s.fired && !s.cancelled && (
+                      <button className="btn text-xs" onClick={() => cancelSchedule(s.id)}>
+                        Cancel
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="mt-3 text-xs text-ink-dim">
+          Social crash webhook URL: <code className="num">POST /api/crash/webhook/dev-webhook-token</code>.
+          Override the token via <code className="num">CRASH_WEBHOOK_TOKEN</code>. Rate limited to one fire per minute.
+        </p>
       </section>
 
       <section className="card">

@@ -4,6 +4,8 @@ import { useLiveState } from "@/lib/hooks/useLiveState";
 import { formatAud, pctChange } from "@/lib/money";
 import { Sparkline } from "@/components/Sparkline";
 import { Logo } from "@/components/Logo";
+import { RevenueChart } from "@/components/RevenueChart";
+import type { MarginAlert } from "@/lib/types";
 
 interface ShiftSummary {
   shiftId: string;
@@ -27,15 +29,21 @@ export default function DashboardPage() {
   const { state } = useLiveState();
   const [summary, setSummary] = useState<ShiftSummary | null>(null);
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [buckets, setBuckets] = useState<{ hour: string; revenue: number; orders: number }[]>([]);
+  const [alerts, setAlerts] = useState<MarginAlert[]>([]);
 
   useEffect(() => {
     const load = async () => {
-      const [s, o] = await Promise.all([
-        fetch("/api/shift", { cache: "no-store" }).then((r) => r.json()),
-        fetch("/api/orders", { cache: "no-store" }).then((r) => r.json()),
+      const [s, o, r, a] = await Promise.all([
+        fetch("/api/shift", { cache: "no-store" }).then((x) => x.json()),
+        fetch("/api/orders", { cache: "no-store" }).then((x) => x.json()),
+        fetch("/api/dashboard/revenue-per-hour", { cache: "no-store" }).then((x) => x.json()),
+        fetch("/api/alerts", { cache: "no-store" }).then((x) => x.json()),
       ]);
       setSummary(s);
       setOrders(o.orders ?? []);
+      setBuckets(r.buckets ?? []);
+      setAlerts(a.alerts ?? []);
     };
     load();
     const t = setInterval(load, 4000);
@@ -105,6 +113,32 @@ export default function DashboardPage() {
               ))}
               {orders.length === 0 && <li className="text-sm text-ink-dim">No orders yet.</li>}
             </ul>
+          </div>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="card">
+            <h2 className="text-sm font-semibold uppercase tracking-widest text-ink-dim">Revenue per hour (today)</h2>
+            <div className="mt-3">
+              <RevenueChart buckets={buckets} />
+            </div>
+          </div>
+          <div className="card">
+            <h2 className="text-sm font-semibold uppercase tracking-widest text-ink-dim">Margin alerts</h2>
+            {alerts.length === 0 ? (
+              <p className="mt-3 text-sm text-ink-dim">No drinks at margin floor.</p>
+            ) : (
+              <ul className="mt-3 space-y-1 text-sm">
+                {alerts.map((a) => (
+                  <li key={a.drinkId} className="flex items-center justify-between border-b border-edge/50 pb-1">
+                    <span>{a.drinkName}</span>
+                    <span className="num text-amber">
+                      floor {formatAud(a.floor)} - since {new Date(a.enteredAt).toLocaleTimeString("en-AU")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </section>
 

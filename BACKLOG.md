@@ -1,44 +1,35 @@
 # Backlog
 
-Things from the brief that this implementation does not yet do. One-liners only;
-move to a tracked issue before working on any of them.
+Items from the brief that this implementation does NOT yet fully implement. The full
+spec is in `Drink_Exchange_Build_Brief.PDF`.
 
-## Phase 3 - POS
+## Genuinely external (need a real account + credentials)
 
-- Stripe Terminal adapter (`chargeAmount`, `refundCharge`, `getTerminalStatus`).
-- Square adapter behind the same interface.
-- PIN-based auth via Better Auth or Clerk; per-staff PINs hashed at rest.
-- Tabs: leave order open across rounds, list open tabs on POS landing.
-- Manager-PIN gate on post-charge voids and refunds.
-- Digital receipts (Twilio SMS, Postmark or Resend email).
-- Offline cache via IndexedDB; queue orders and replay on reconnect; conflict review screen.
-- Z-report generation on shift close + email to ownership.
+- Stripe Terminal real adapter implementation against the BBPOS WisePOS E hardware. Adapter scaffold lives in `src/lib/providers/payment.ts`.
+- Square real adapter implementation. Scaffold in the same file.
+- Twilio SMS sends. Scaffold in `src/lib/providers/receipt.ts`. Set `RECEIPT_PROVIDER=twilio` and provide credentials.
+- Postmark or Resend email sends. Same file.
+- Better Auth or Clerk integration. The current PIN flow is server-validated against the in-memory staff store; swap to real hashed PINs and sessions before production.
+- TOTP 2FA on admin and owner accounts. Hook into whichever auth you pick.
+- Sentry, Axiom (Better Stack), uptime monitoring.
+- Pusher Channels or Supabase Realtime to replace SSE for multi-instance deployments.
 
-## Phase 4 - Admin and Dashboard
+## Persistence
 
-- TOTP 2FA on admin and owner accounts.
-- Staff CRUD page + role assignment.
-- Crash schedule (cron-like) + social webhook trigger with rate limiting.
-- Per-shift max-discount cap auto-throttling.
-- Cooling-off window UI hint when blocked.
-- Dashboard: revenue-per-hour chart with day-ago / week-ago overlays.
-- Daily summary email at 03:00 ACDT.
-- Margin alerts feed (drinks at floor > 5 minutes).
+- Wire write-through from the in-memory store to Postgres via the Drizzle schema in `src/lib/db/schema.ts`. The schema is ready; the writes are not yet plumbed.
+- Nightly `pg_dump` to S3-compatible storage.
 
-## Phase 5 - Hardening
+## Operational gaps
 
-- Postgres persistence wired into `src/lib/store.ts` writes.
-- Replace SSE with Pusher Channels (or Supabase Realtime) for multi-instance scale.
-- Sentry + Axiom integration.
-- Backups: nightly pg_dump to S3-compatible storage.
-- Disaster recovery runbook.
-- Receipt printer integration (Epson TM-m30 ESC/POS).
-- BAS export (CSV with GST broken out).
-- Operator manual + staff cheat sheet.
-- Load test: 200 concurrent orders in 5 minutes.
+- Inngest or BullMQ scheduler to call `/api/dashboard/daily-summary?format=html` at 03:00 ACDT and email it via the receipt provider.
+- Receipt printer adapter (Epson TM-m30 ESC/POS).
+- 200-orders-in-5-minutes synthetic load test.
+- Mobile-responsive polish on admin pages beyond the desktop layout.
 
-## Brand
+## Phase 6 candidate (out of scope per brief section 14)
 
-- Replace the placeholder crash stinger at `/public/crash.mp3` with the real 1.5s sweep.
-- Add the order-ding chime for POS.
-- Bebas Neue is loaded from Google Fonts; bundle locally for offline kiosk reliability.
+- Loyalty programme
+- Multi-venue / franchise support
+- Pre-order / table reservations (use Now Book It or SevenRooms)
+- Inventory cost tracking and pour reconciliation
+- Trading competitions, portfolios, virtual currencies
