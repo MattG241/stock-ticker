@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    background-color: #09090b;
+    color: #fafafa;
+  }
+  body {
+    font-feature-settings: "ss01", "cv11";
+  }
+  .num {
+    font-variant-numeric: tabular-nums lining-nums;
+    font-family: var(--font-mono, "JetBrains Mono"), ui-monospace, monospace;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-edge bg-bg-card p-4;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-edge bg-bg-elev px-3 py-2 text-sm font-medium text-ink transition hover:border-ink-dim disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply btn border-bull/40 bg-bull/10 text-bull hover:border-bull;
+  }
+  .btn-danger {
+    @apply btn border-bear/40 bg-bear/10 text-bear hover:border-bear;
+  }
+}
+
+.scroll-tape {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 5%,
+    black 95%,
+    transparent
+  );
+}
