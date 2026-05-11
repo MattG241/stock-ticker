@@ -184,4 +184,39 @@ export type RealtimeEvent =
   | { type: "order.updated"; payload: { id: string; barAcked: boolean; status: Order["status"] } }
   | { type: "drink.updated"; payload: Drink }
   | { type: "drink.deleted"; payload: { drinkId: string } }
-  | { type: "settings.updated"; payload: Settings };
+  | { type: "settings.updated"; payload: Settings }
+  | { type: "customer.view.updated"; payload: CustomerView };
+
+export interface CustomerViewLine {
+  drinkId: string;
+  ticker: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  locked: boolean;
+}
+
+export interface CustomerView {
+  lines: CustomerViewLine[];
+  subtotal: number;
+  discountAmount: number;
+  discountReason: string | null;
+  tipAmount: number;
+  cashAdjustment: number;
+  total: number;
+  paymentMethod: "card" | "cash" | null;
+  cashTendered: number | null;
+  changeDue: number | null;
+  status:
+    | "idle"
+    | "building"
+    | "awaiting-tip"
+    | "awaiting-cash"
+    | "processing"
+    | "paid"
+    | "failed";
+  lastOrderNumber: number | null;
+  lastReceiptUrl: string | null;
+  updatedAt: string;
+}

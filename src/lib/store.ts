@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type {
   AuditEntry,
   CrashEvent,
+  CustomerView,
   Drink,
   MarginAlert,
   Order,
@@ -45,6 +46,26 @@ export interface Store {
   alertsStarted: boolean;
   bellArmed: boolean;
   crashTimer: NodeJS.Timeout | null;
+  customerView: CustomerView;
+}
+
+export function emptyCustomerView(): CustomerView {
+  return {
+    lines: [],
+    subtotal: 0,
+    discountAmount: 0,
+    discountReason: null,
+    tipAmount: 0,
+    cashAdjustment: 0,
+    total: 0,
+    paymentMethod: null,
+    cashTendered: null,
+    changeDue: null,
+    status: "idle",
+    lastOrderNumber: null,
+    lastReceiptUrl: null,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function defaultSettings(): Settings {
@@ -132,6 +153,7 @@ function createStore(): Store {
     alertsStarted: false,
     bellArmed: false,
     crashTimer: null,
+    customerView: emptyCustomerView(),
   };
 }
 

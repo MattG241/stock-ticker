@@ -357,13 +357,9 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     discountedSubtotal - discountedSubtotal / (1 + settings.gstRate),
   );
 
-  // Tip (card only, not taxable, not subject to cash rounding).
+  // Tip (allowed on both card and cash, not taxable, not subject to cash rounding).
   let tipAmount = 0;
   if (input.tipAmount && input.tipAmount > 0) {
-    if (input.paymentMethod !== "card") {
-      if (isNewOrder) store.nextOrderNumber -= 1;
-      return { ok: false, reason: "Tips can only be added on card payments" };
-    }
     if (input.tipAmount > 1000) {
       if (isNewOrder) store.nextOrderNumber -= 1;
       return { ok: false, reason: "Tip exceeds limit" };

@@ -5,7 +5,7 @@ import { formatAud, roundCashAud } from "@/lib/money";
 import { Logo } from "@/components/Logo";
 import { CrashBanner } from "@/components/CrashBanner";
 import { QrImage } from "@/components/QrImage";
-import type { DrinkCategory } from "@/lib/types";
+import type { CustomerView, DrinkCategory } from "@/lib/types";
 
 interface CartLine {
   drinkId: string;
@@ -173,6 +173,7 @@ export function PosClient() {
 
   const [tipOpen, setTipOpen] = useState(false);
   const [tipCustom, setTipCustom] = useState("");
+  const [pendingTip, setPendingTip] = useState(0);
 
   const [compOpen, setCompOpen] = useState(false);
   const [compMode, setCompMode] = useState<"$" | "%">("$");
@@ -456,6 +457,64 @@ export function PosClient() {
     });
   }, [state, search, activeCategory]);
 
+  // Publish the current cart state to the customer-facing display.
+  const publishView = useCallback(
+    (overrides: Partial<CustomerView> = {}) => {
+      const lines = cartView.lines.map((l) => ({
+        drinkId: l.drinkId,
+        ticker: l.ticker,
+        name: l.name,
+        quantity: l.quantity,
+        unitPrice: l.unit,
+        lineTotal: l.lineTotal,
+        locked: true,
+      }));
+      const total =
+        paymentMethod === "cash" ? cartView.cashTotal : cartView.afterDiscountSubtotal;
+      const cashAdj =
+        paymentMethod === "cash"
+          ? Math.round((cartView.cashTotal - cartView.afterDiscountSubtotal) * 100) / 100
+          : 0;
+      const payload = {
+        lines,
+        subtotal: cartView.combinedSubtotal,
+        discountAmount: pendingDiscount?.amount ?? 0,
+        discountReason: pendingDiscount?.reason ?? null,
+        tipAmount: 0,
+        cashAdjustment: cashAdj,
+        total,
+        paymentMethod,
+        cashTendered: null,
+        changeDue: null,
+        status: lines.length ? "building" : "idle",
+        lastOrderNumber: null,
+        lastReceiptUrl: null,
+        ...overrides,
+      };
+      fetch("/api/pos/customer-view", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+    },
+    [cartView, pendingDiscount, paymentMethod],
+  );
+
+  const resetCustomerView = useCallback(() => {
+    fetch("/api/pos/customer-view", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: "reset" }),
+    }).catch(() => {});
+  }, []);
+
+  // Debounced publish on cart / payment / discount changes.
+  useEffect(() => {
+    if (!staffId) return;
+    const t = setTimeout(() => publishView({}), 250);
+    return () => clearTimeout(t);
+  }, [publishView, staffId]);
+
   const ensureIdempotencyKey = useCallback(() => {
     if (!idempotencyRef.current) {
       const k = newIdempotencyKey();
@@ -528,6 +587,7 @@ export function PosClient() {
   const signOut = () => {
     setStaffId(null);
     setStaffRole(null);
+    resetCustomerView();
   };
 
   const addToCart = (drinkId: string, ticker: string, name: string, unit: number, qty = 1) => {
@@ -620,6 +680,7 @@ export function PosClient() {
       managerPin: pendingDiscount?.managerPin,
     };
 
+    publishView({ status: "processing", tipAmount: opts?.tipAmount ?? 0 });
     try {
       if (!online) throw new Error("offline");
       const res = await fetch("/api/orders", {
@@ -630,6 +691,9 @@ export function PosClient() {
       const data = await res.json();
       if (!res.ok || !data.ok) {
         setToast({ kind: "err", msg: data.reason ?? "Order failed" });
+        publishView({ status: "failed" });
+        // Reset customer view after a beat so it doesn't get stuck on "failed".
+        setTimeout(() => resetCustomerView(), 4000);
       } else {
         // Remember last order for "Repeat last".
         setLastOrder({
@@ -641,6 +705,24 @@ export function PosClient() {
           paymentMethod === "cash" && typeof opts?.cashTendered === "number"
             ? Math.max(0, opts.cashTendered - data.order.total)
             : null;
+        const receiptUrl =
+          typeof window !== "undefined"
+            ? `${window.location.origin}/receipts/${data.order.id}`
+            : `/receipts/${data.order.id}`;
+        publishView({
+          status: "paid",
+          lines: [],
+          total: data.order.total,
+          tipAmount: data.order.tipAmount ?? 0,
+          cashTendered: opts?.cashTendered ?? null,
+          changeDue: change,
+          lastOrderNumber: data.order.orderNumber,
+          lastReceiptUrl: receiptUrl,
+        });
+        // Auto-clear customer-view to idle after 8 seconds so the next customer
+        // sees a clean welcome screen.
+        setTimeout(() => resetCustomerView(), 8000);
+
         setSuccessOpen({
           id: data.order.id,
           orderNumber: data.order.orderNumber,
@@ -667,9 +749,11 @@ export function PosClient() {
       setActiveTabId(null);
       setPendingDiscount(null);
       clearIdempotencyKey();
+      resetCustomerView();
     } finally {
       chargingRef.current = false;
       setCharging(false);
+      setPendingTip(0);
     }
   };
 
@@ -678,28 +762,33 @@ export function PosClient() {
       setToast({ kind: "err", msg: "Market is closed - no orders" });
       return;
     }
+    setTipCustom("");
+    setPendingTip(0);
+    setTipOpen(true);
+    publishView({ status: "awaiting-tip" });
+  };
+
+  const confirmTip = (tipAmount: number) => {
+    setPendingTip(tipAmount);
+    setTipOpen(false);
     if (paymentMethod === "cash") {
       setCashInput("");
       setCashOpen(true);
+      publishView({ status: "awaiting-cash", tipAmount });
     } else {
-      setTipCustom("");
-      setTipOpen(true);
+      sendOrder({ tipAmount });
     }
   };
 
   const confirmCashTendered = () => {
+    const total = cartView.cashTotal + pendingTip;
     const v = parseFloat(cashInput);
-    if (!Number.isFinite(v) || v < cartView.cashTotal) {
-      setToast({ kind: "err", msg: `Tendered must be ≥ ${formatAud(cartView.cashTotal)}` });
+    if (!Number.isFinite(v) || v < total) {
+      setToast({ kind: "err", msg: `Tendered must be ≥ ${formatAud(total)}` });
       return;
     }
     setCashOpen(false);
-    sendOrder({ cashTendered: v });
-  };
-
-  const confirmTip = (tipAmount: number) => {
-    setTipOpen(false);
-    sendOrder({ tipAmount });
+    sendOrder({ cashTendered: v, tipAmount: pendingTip });
   };
 
   const saveAsTab = () => {
@@ -748,6 +837,37 @@ export function PosClient() {
       setTabModal(false);
     } catch {
       setToast({ kind: "err", msg: "Network error opening tab" });
+    }
+  };
+
+  const addRoundToTab = async () => {
+    if (!activeTabId || !cartView.lines.length) return;
+    try {
+      const res = await fetch("/api/tabs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add",
+          tabId: activeTabId,
+          staffId,
+          items: cartView.lines.map((l) => ({
+            drinkId: l.drinkId,
+            quantity: l.quantity,
+            expectedUnitPrice: l.unit,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setToast({ kind: "err", msg: data.reason ?? "Add to tab failed" });
+        return;
+      }
+      setToast({ kind: "ok", msg: `Round added · tab now ${formatAud(data.order.total)}` });
+      setCart([]);
+      clearIdempotencyKey();
+      // The tabs poller will pick up the new lines within 4s.
+    } catch {
+      setToast({ kind: "err", msg: "Network error" });
     }
   };
 
@@ -1209,10 +1329,8 @@ export function PosClient() {
                   />
                   <button className="btn px-2 py-0.5" onClick={() => setQuantity(l.drinkId, l.quantity + 1)}>+</button>
                 </div>
-                <div className={`num ${l.moved ? "text-amber" : "text-ink-dim"}`}>
-                  {l.moved
-                    ? `quoted ${formatAud(l.unit)} · now ${formatAud(l.liveUnit)}/u`
-                    : `${formatAud(l.unit)}/u`}
+                <div className="num text-ink-dim">
+                  {formatAud(l.unit)}/u
                 </div>
               </div>
             </div>
@@ -1278,13 +1396,24 @@ export function PosClient() {
             className="w-full rounded-sm px-3 py-2 text-xs"
           />
           <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={saveAsTab}
-              disabled={!cartView.lines.length || !!activeTabId}
-              className="btn disabled:opacity-40"
-            >
-              Save as tab
-            </button>
+            {activeTabId ? (
+              <button
+                onClick={addRoundToTab}
+                disabled={!cartView.lines.length}
+                className="btn disabled:opacity-40"
+                title="Commit these items to the tab without charging"
+              >
+                ↑ Add to tab
+              </button>
+            ) : (
+              <button
+                onClick={saveAsTab}
+                disabled={!cartView.lines.length}
+                className="btn disabled:opacity-40"
+              >
+                Save as tab
+              </button>
+            )}
             <button
               onClick={onChargePressed}
               disabled={charging || !isOpen || (!cartView.lines.length && !activeTabId)}
@@ -1294,11 +1423,17 @@ export function PosClient() {
                 ? "Charging..."
                 : !isOpen
                   ? "Market closed"
-                  : `Charge ${formatAud(
-                      paymentMethod === "cash"
-                        ? cartView.cashTotal
-                        : cartView.afterDiscountSubtotal,
-                    )}`}
+                  : activeTabId
+                    ? `Close tab ${formatAud(
+                        paymentMethod === "cash"
+                          ? cartView.cashTotal
+                          : cartView.afterDiscountSubtotal,
+                      )}`
+                    : `Charge ${formatAud(
+                        paymentMethod === "cash"
+                          ? cartView.cashTotal
+                          : cartView.afterDiscountSubtotal,
+                      )}`}
             </button>
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -1532,47 +1667,60 @@ export function PosClient() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85">
           <div className="panel w-full max-w-sm">
             <h3 className="label">Cash tendered</h3>
-            <div className="mt-2 flex items-center justify-between text-xs text-ink-dim">
-              <span>Total due</span>
+            <div className="mt-2 flex items-center justify-between text-[11px] text-ink-dim">
+              <span>Order (rounded to 5c)</span>
+              <span className="num">{formatAud(cartView.cashTotal)}</span>
+            </div>
+            {pendingTip > 0 && (
+              <div className="flex items-center justify-between text-[11px] text-bull">
+                <span>Tip</span>
+                <span className="num">{formatAud(pendingTip)}</span>
+              </div>
+            )}
+            <div className="mt-1 flex items-center justify-between text-xs">
+              <span className="label">Total due</span>
               <span className="num text-lg font-semibold text-ink">
-                {formatAud(cartView.cashTotal)}
+                {formatAud(cartView.cashTotal + pendingTip)}
               </span>
             </div>
             <input
               type="number"
               inputMode="decimal"
               step="0.05"
-              min={cartView.cashTotal}
+              min={cartView.cashTotal + pendingTip}
               value={cashInput}
               onChange={(e) => setCashInput(e.target.value)}
-              placeholder={`${cartView.cashTotal.toFixed(2)}`}
+              placeholder={`${(cartView.cashTotal + pendingTip).toFixed(2)}`}
               autoFocus
               className="mt-3 w-full rounded-sm px-3 py-2 num text-xl"
             />
             <div className="mt-2 flex flex-wrap gap-1">
-              {[
-                cartView.cashTotal,
-                Math.ceil(cartView.cashTotal / 5) * 5,
-                Math.ceil(cartView.cashTotal / 10) * 10,
-                Math.ceil(cartView.cashTotal / 20) * 20,
-                Math.ceil(cartView.cashTotal / 50) * 50,
-              ]
-                .filter((v, i, a) => a.indexOf(v) === i)
-                .map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setCashInput(v.toFixed(2))}
-                    className="btn flex-1 px-2 py-1 text-[11px]"
-                  >
-                    {formatAud(v)}
-                  </button>
-                ))}
+              {(() => {
+                const total = cartView.cashTotal + pendingTip;
+                return [
+                  total,
+                  Math.ceil(total / 5) * 5,
+                  Math.ceil(total / 10) * 10,
+                  Math.ceil(total / 20) * 20,
+                  Math.ceil(total / 50) * 50,
+                ]
+                  .filter((v, i, a) => a.indexOf(v) === i)
+                  .map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setCashInput(v.toFixed(2))}
+                      className="btn flex-1 px-2 py-1 text-[11px]"
+                    >
+                      {formatAud(v)}
+                    </button>
+                  ));
+              })()}
             </div>
-            {parseFloat(cashInput) >= cartView.cashTotal && (
+            {parseFloat(cashInput) >= cartView.cashTotal + pendingTip && (
               <div className="mt-3 flex items-center justify-between text-xs text-bull">
                 <span className="label">Change due</span>
                 <span className="num text-lg font-semibold">
-                  {formatAud(parseFloat(cashInput) - cartView.cashTotal)}
+                  {formatAud(parseFloat(cashInput) - (cartView.cashTotal + pendingTip))}
                 </span>
               </div>
             )}
@@ -1591,11 +1739,15 @@ export function PosClient() {
           <div className="panel w-full max-w-sm">
             <h3 className="label">Add a tip?</h3>
             <p className="mt-2 text-xs text-ink-dim">
-              Charge total: {formatAud(cartView.afterDiscountSubtotal)}
+              {paymentMethod === "cash"
+                ? `Cash total: ${formatAud(cartView.cashTotal)} · tip is added on top`
+                : `Charge total: ${formatAud(cartView.afterDiscountSubtotal)}`}
             </p>
             <div className="mt-3 grid grid-cols-3 gap-2">
               {TIP_PRESETS.map((p) => {
-                const tip = Math.round(cartView.afterDiscountSubtotal * p * 100) / 100;
+                const base =
+                  paymentMethod === "cash" ? cartView.cashTotal : cartView.afterDiscountSubtotal;
+                const tip = Math.round(base * p * 100) / 100;
                 return (
                   <button
                     key={p}
@@ -1629,7 +1781,9 @@ export function PosClient() {
                 }}
                 className="btn-primary flex-1"
               >
-                Charge {formatAud(cartView.afterDiscountSubtotal + (parseFloat(tipCustom) || 0))}
+                {paymentMethod === "cash" ? "Next" : `Charge ${formatAud(
+                  cartView.afterDiscountSubtotal + (parseFloat(tipCustom) || 0)
+                )}`}
               </button>
             </div>
           </div>
