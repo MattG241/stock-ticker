@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 
-const FLASH_MS = 3000;
+const FLASH_MS = 2500;
 
 export function CrashOverlay({
   active,
@@ -39,17 +39,29 @@ export function CrashOverlay({
       <audio ref={audioRef} src="/crash.mp3" preload="auto" />
       {flash && (
         <div
-          className="pointer-events-none fixed inset-0 z-50 bg-gradient-to-br from-bear via-bear/80 to-bear/50 animate-flash"
-          style={{ opacity: 0.8 }}
+          className="pointer-events-none fixed inset-0 z-50"
+          style={{
+            background:
+              "radial-gradient(circle at center, rgba(255,71,87,0.45) 0%, rgba(255,71,87,0.15) 40%, transparent 75%)",
+            animation: "flash 200ms ease-out",
+            opacity: 0.9,
+          }}
         />
       )}
       {active && (
-        <div className="sticky top-0 z-40 bg-bear text-bg px-4 py-2 flex items-center justify-between border-b-2 border-bear/70 shadow-lg">
-          <div className="flex items-center gap-3 font-display text-2xl tracking-widest">
-            <span aria-hidden>⚠</span>
-            MARKET CRASH {Math.round(discountPercent * 100)}% OFF
+        <div className="sticky top-0 z-40 flex items-center justify-between border-b border-bear/40 bg-bear/10 px-6 py-2 backdrop-blur">
+          <div className="flex items-center gap-4">
+            <span className="num rounded-sm border border-bear/60 bg-bear/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.32em] text-bear">
+              Halt
+            </span>
+            <span className="text-xs uppercase tracking-[0.32em] text-bear/90">
+              Market-wide crash · {Math.round(discountPercent * 100)}% off all dynamic drinks
+            </span>
           </div>
-          <div className="num text-2xl font-bold">{remainingSeconds}s</div>
+          <div className="flex items-baseline gap-2">
+            <span className="label text-bear/80">Remaining</span>
+            <span className="num text-xl font-semibold text-bear">{remainingSeconds.toString().padStart(2, "0")}s</span>
+          </div>
         </div>
       )}
     </>

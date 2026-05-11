@@ -14,21 +14,22 @@ export function Ticker({
     const pct = ((d.currentPrice - d.basePrice) / d.basePrice) * 100;
     const up = pct >= 0;
     return (
-      <span key={d.id} className="inline-flex items-center gap-2 px-6">
-        <span className="text-ink-dim">{d.emoji}</span>
-        <span className="uppercase tracking-widest text-xs text-ink-dim">{d.name}</span>
-        <span className={`num text-sm ${crash ? "text-bear" : "text-ink"}`}>
+      <span key={d.id} className="inline-flex items-center gap-2 px-5">
+        <span className="num text-[11px] font-semibold tracking-[0.06em] text-ink">{d.ticker}</span>
+        <span className={`num text-[12px] ${crash ? "text-bear" : "text-ink"}`}>
           {formatAud(d.displayPrice)}
         </span>
-        <span className={`num text-xs ${up ? "text-bull" : "text-bear"}`}>
-          {up ? "▲" : "▼"} {Math.abs(pct).toFixed(2)}%
+        <span className={`num text-[11px] ${up ? "text-bull" : "text-bear"}`}>
+          {up ? "▲" : "▼"}
+          {Math.abs(pct).toFixed(2)}%
         </span>
+        <span className="text-ink-ghost">·</span>
       </span>
     );
   });
   return (
     <div
-      className={`scroll-tape overflow-hidden whitespace-nowrap border-y border-edge py-2 ${
+      className={`scroll-tape overflow-hidden whitespace-nowrap border-y border-edge bg-bg-card/60 py-1.5 ${
         crash ? "text-bear" : ""
       }`}
     >

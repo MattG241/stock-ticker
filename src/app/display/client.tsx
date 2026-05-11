@@ -18,7 +18,11 @@ export function DisplayClient() {
   const [audioArmed, setAudioArmed] = useState(false);
 
   if (!state) {
-    return <div className="flex h-screen items-center justify-center text-ink-dim">Loading market...</div>;
+    return (
+      <div className="flex h-screen items-center justify-center bg-bg text-ink-dim">
+        <span className="num text-xs uppercase tracking-[0.32em]">Connecting to market...</span>
+      </div>
+    );
   }
 
   const crashActive = state.crash.active;
@@ -26,19 +30,20 @@ export function DisplayClient() {
   const remaining = state.crash.remainingSeconds;
 
   return (
-    <div className="min-h-screen">
+    <div className="display-scanlines min-h-screen bg-bg">
       {!audioArmed && (
         <button
           onClick={() => setAudioArmed(true)}
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-bg/80 text-2xl tracking-widest font-display"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-bg/90 text-xs uppercase tracking-[0.32em] text-ink-dim hover:text-ink"
         >
-          TAP TO ENABLE SOUND
+          [ tap to enable audio ]
         </button>
       )}
       <CrashOverlay active={crashActive} discountPercent={discount} remainingSeconds={remaining} />
       <DisplayHeader
         tradingOpen={state.tradingOpen}
         marketIndexPct={state.marketIndexPct}
+        drinks={state.drinks}
         connection={state.connectionStatus}
       />
       <Ticker drinks={state.drinks} crash={crashActive} />
@@ -53,16 +58,22 @@ export function DisplayClient() {
   );
 }
 
-function MainGrid({ state, crash }: { state: ReturnType<typeof useLiveState>["state"] & object; crash: boolean }) {
-  if (!state) return null;
+function MainGrid({
+  state,
+  crash,
+}: {
+  state: NonNullable<ReturnType<typeof useLiveState>["state"]>;
+  crash: boolean;
+}) {
   return (
-    <main className="px-6 py-6">
+    <main className="px-6 py-4">
       {!state.tradingOpen && (
-        <div className="mb-4 card border-amber text-amber">
-          MARKET CLOSED. Last-known prices shown. Opens at {state.settings.tradingOpen}.
+        <div className="panel mb-3 border-amber/40 text-amber">
+          <span className="label text-amber">Market closed</span>
+          <p className="mt-1 text-sm">Last-known prices shown. Opens at {state.settings.tradingOpen}.</p>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {state.drinks.map((d) => (
           <DrinkCard key={d.id} drink={d} crash={crash} />
         ))}
@@ -71,52 +82,57 @@ function MainGrid({ state, crash }: { state: ReturnType<typeof useLiveState>["st
   );
 }
 
-function TapeOnly({ state }: { state: ReturnType<typeof useLiveState>["state"] }) {
-  if (!state) return null;
+function TapeOnly({ state }: { state: NonNullable<ReturnType<typeof useLiveState>["state"]> }) {
   return (
-    <main className="flex h-[calc(100vh-7rem)] items-center justify-center">
-      <div className="w-full">
-        <Ticker drinks={state.drinks} crash={state.crash.active} />
-        <Ticker drinks={state.drinks} crash={state.crash.active} />
-        <Ticker drinks={state.drinks} crash={state.crash.active} />
-      </div>
+    <main className="flex h-[calc(100vh-4.5rem)] flex-col justify-evenly bg-bg">
+      <Ticker drinks={state.drinks} crash={state.crash.active} />
+      <Ticker drinks={state.drinks} crash={state.crash.active} />
+      <Ticker drinks={state.drinks} crash={state.crash.active} />
+      <Ticker drinks={state.drinks} crash={state.crash.active} />
+      <Ticker drinks={state.drinks} crash={state.crash.active} />
     </main>
   );
 }
 
-function Featured({ state }: { state: ReturnType<typeof useLiveState>["state"] }) {
+function Featured({ state }: { state: NonNullable<ReturnType<typeof useLiveState>["state"]> }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setIdx((i) => i + 1), 30000);
     return () => clearInterval(t);
   }, []);
-  if (!state) return null;
   const all = state.drinks.filter((d) => d.isActive);
   if (!all.length) return null;
   const start = (idx * 3) % all.length;
   const selected = [0, 1, 2].map((k) => all[(start + k) % all.length]);
   const crash = state.crash.active;
   return (
-    <main className="px-10 py-6 grid grid-cols-3 gap-6">
+    <main className="grid grid-cols-3 gap-3 px-6 py-5">
       {selected.map((d) => {
         const pct = pctChange(d.currentPrice, d.basePrice);
         const up = pct >= 0;
+        const change = d.currentPrice - d.basePrice;
         return (
-          <div key={d.id} className="card flex flex-col items-center justify-center gap-4 aspect-square">
-            <div className="text-7xl">{d.emoji}</div>
-            <div className="font-display text-3xl tracking-widest text-center">{d.name}</div>
-            {crash && d.isDynamic ? (
-              <>
-                <div className="num text-2xl text-ink-dim line-through">{formatAud(d.currentPrice)}</div>
-                <div className="num text-6xl font-bold text-bear">{formatAud(d.displayPrice)}</div>
-              </>
-            ) : (
-              <div className="num text-6xl font-bold">{formatAud(d.displayPrice)}</div>
-            )}
-            <div className={`num text-lg ${up ? "text-bull" : "text-bear"}`}>
-              {up ? "▲" : "▼"} {Math.abs(pct).toFixed(2)}%
+          <div key={d.id} className="panel relative flex aspect-square flex-col justify-between">
+            <div className="flex items-start justify-between">
+              <span className="ticker-symbol-lg">{d.ticker}</span>
+              <span className="label">{d.category}</span>
             </div>
-            <Sparkline points={d.spark} basePrice={d.basePrice} width={240} height={48} />
+            <div className="flex flex-col items-start gap-1">
+              <span className="text-xs uppercase tracking-[0.24em] text-ink-dim">{d.name}</span>
+              {crash && d.isDynamic ? (
+                <>
+                  <span className="num text-base text-ink-ghost line-through">{formatAud(d.currentPrice)}</span>
+                  <span className="num text-6xl font-semibold text-bear">{formatAud(d.displayPrice)}</span>
+                </>
+              ) : (
+                <span className="num text-6xl font-semibold">{formatAud(d.displayPrice)}</span>
+              )}
+              <div className={`num text-sm ${up ? "text-bull" : "text-bear"}`}>
+                {up ? "▲" : "▼"} {Math.abs(pct).toFixed(2)}% · {change >= 0 ? "+" : ""}
+                {change.toFixed(2)}
+              </div>
+            </div>
+            <Sparkline points={d.spark} basePrice={d.basePrice} width={300} height={56} />
           </div>
         );
       })}

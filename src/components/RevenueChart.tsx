@@ -26,7 +26,7 @@ export function RevenueChart({ buckets, height = 160 }: { buckets: Bucket[]; hei
           x2={layout.w - layout.padding}
           y1={height - layout.padding}
           y2={height - layout.padding}
-          stroke="#27272A"
+          stroke="#1A2027"
         />
         {buckets.map((b, i) => {
           const h = (b.revenue / layout.max) * layout.innerH;
@@ -39,7 +39,7 @@ export function RevenueChart({ buckets, height = 160 }: { buckets: Bucket[]; hei
                 y={y}
                 width={Math.max(2, layout.barW - 2)}
                 height={Math.max(0, h)}
-                fill={b.revenue > 0 ? "#10B981" : "#27272A"}
+                fill={b.revenue > 0 ? "#22D48F" : "#1A2027"}
                 rx={1}
               />
               {(i === 0 || i % 4 === 0) && (

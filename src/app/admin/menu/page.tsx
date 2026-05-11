@@ -29,45 +29,49 @@ export default function MenuPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-3xl tracking-widest">MENU</h1>
-      <p className="text-sm text-ink-dim">
-        Toggle active state, edit base price, or override the live price (logged in audit).
-      </p>
-      <table className="w-full text-sm">
-        <thead className="text-left text-xs uppercase tracking-wider text-ink-dim">
-          <tr>
-            <th className="py-2">Drink</th>
+      <div>
+        <h1 className="font-display text-3xl tracking-[0.28em]">MENU</h1>
+        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-ink-dim">
+          Toggle active state · edit base price · override the live price (logged in audit)
+        </p>
+      </div>
+      <table className="w-full text-xs">
+        <thead className="text-left label">
+          <tr className="border-b border-edge">
+            <th className="py-2">Ticker</th>
+            <th>Name</th>
             <th>Cat</th>
-            <th>Base</th>
-            <th>Now</th>
-            <th>Cost</th>
-            <th>Dynamic</th>
-            <th>Active</th>
+            <th className="text-right">Base</th>
+            <th className="text-right">Now</th>
+            <th className="text-right">Cost</th>
+            <th className="text-center">Dyn</th>
+            <th className="text-center">Active</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {drinks.map((d) => (
-            <tr key={d.id} className="border-t border-edge align-middle">
+            <tr key={d.id} className="border-b border-edge/40 last:border-0">
               <td className="py-2">
-                {d.emoji} <span className="ml-1">{d.name}</span>
+                <span className="ticker-symbol">{d.ticker}</span>
               </td>
+              <td className="text-ink/90">{d.name}</td>
               <td className="text-ink-dim">{d.category}</td>
-              <td className="num">{formatAud(d.basePrice)}</td>
-              <td className="num">{formatAud(d.currentPrice)}</td>
-              <td className="num text-ink-dim">{formatAud(d.costPrice)}</td>
-              <td>
+              <td className="num text-right">{formatAud(d.basePrice)}</td>
+              <td className="num text-right">{formatAud(d.currentPrice)}</td>
+              <td className="num text-right text-ink-dim">{formatAud(d.costPrice)}</td>
+              <td className="text-center">
                 <button
-                  className="btn px-2 py-0.5 text-xs"
+                  className="btn px-2 py-0.5"
                   onClick={() => patch(d.id, { isDynamic: !d.isDynamic })}
                   disabled={busyId === d.id}
                 >
                   {d.isDynamic ? "Yes" : "No"}
                 </button>
               </td>
-              <td>
+              <td className="text-center">
                 <button
-                  className="btn px-2 py-0.5 text-xs"
+                  className="btn px-2 py-0.5"
                   onClick={() => patch(d.id, { isActive: !d.isActive })}
                   disabled={busyId === d.id}
                 >
@@ -76,7 +80,7 @@ export default function MenuPage() {
               </td>
               <td className="text-right">
                 <button
-                  className="btn px-2 py-0.5 text-xs"
+                  className="btn px-2 py-0.5"
                   disabled={busyId === d.id}
                   onClick={() => {
                     const v = prompt(`Override price for ${d.name}`, d.currentPrice.toFixed(2));

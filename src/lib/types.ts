@@ -8,6 +8,7 @@ export type DrinkCategory =
 
 export interface Drink {
   id: string;
+  ticker: string;
   name: string;
   category: DrinkCategory;
   emoji: string;
