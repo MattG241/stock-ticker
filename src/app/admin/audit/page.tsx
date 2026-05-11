@@ -20,7 +20,7 @@ export default function AuditPage() {
 
   return (
     <div>
-      <h1 className="font-display text-3xl tracking-widest mb-4">AUDIT LOG</h1>
+      <h1 className="serif text-4xl font-semibold tracking-tight mb-4">Audit Log</h1>
       {entries.length === 0 ? (
         <p className="text-sm text-ink-dim">No entries yet.</p>
       ) : (

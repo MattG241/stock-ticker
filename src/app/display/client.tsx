@@ -56,9 +56,10 @@ export function DisplayClient() {
       {!audioArmed && (
         <button
           onClick={armAudio}
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-bg/90 text-xs uppercase tracking-[0.32em] text-ink-dim hover:text-ink"
+          className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 bg-bg/95 text-xs uppercase tracking-[0.32em] text-brass-dim hover:text-brass"
         >
-          [ tap to enable audio · or load ?audio=skip ]
+          <span className="serif text-2xl tracking-[0.18em] text-ink">Raise a glass</span>
+          <span>[ tap to enable audio · or load ?audio=skip ]</span>
         </button>
       )}
       <CrashOverlay active={crashActive} discountPercent={discount} remainingSeconds={remaining} />
@@ -138,9 +139,9 @@ function Featured({ state }: { state: NonNullable<ReturnType<typeof useLiveState
         const up = pct >= 0;
         const change = d.currentPrice - d.basePrice;
         return (
-          <div key={d.id} className="panel relative flex aspect-square flex-col justify-between">
+          <div key={d.id} className="panel-brass frame-deco relative flex aspect-square flex-col justify-between">
             <div>
-              <div className="text-xl font-semibold leading-tight">{d.name}</div>
+              <div className="serif text-2xl font-semibold leading-tight tracking-tight text-ink">{d.name}</div>
               <div className="mt-2 flex items-center gap-2">
                 <span className="ticker-symbol-lg">{d.ticker}</span>
                 <span className="label">{d.category}</span>
@@ -153,7 +154,7 @@ function Featured({ state }: { state: NonNullable<ReturnType<typeof useLiveState
                   <span className="num text-6xl font-semibold text-bear">{formatAud(d.displayPrice)}</span>
                 </>
               ) : (
-                <span className="num text-6xl font-semibold">{formatAud(d.displayPrice)}</span>
+                <span className="num text-6xl font-semibold text-ink">{formatAud(d.displayPrice)}</span>
               )}
               <div className={`num text-sm ${up ? "text-bull" : "text-bear"}`}>
                 {up ? "▲" : "▼"} {Math.abs(pct).toFixed(2)}% · {change >= 0 ? "+" : ""}

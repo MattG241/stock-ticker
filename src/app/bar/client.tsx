@@ -55,15 +55,16 @@ export function BarClient() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-edge bg-bg-card/50 px-6">
+      <header className="border-b border-edge bg-black/40 px-6">
         <div className="mx-auto flex max-w-6xl items-center justify-between py-3">
-          <Logo size={22} />
+          <Logo size={20} />
           <div className="flex items-center gap-3">
             <span className="label">Bar queue</span>
             <span className="num text-2xl font-semibold text-bull">{pending.length}</span>
             <span className="label">pending</span>
           </div>
         </div>
+        <div className="brand-divider" />
       </header>
       <main className="mx-auto max-w-6xl space-y-5 p-6">
         <section>

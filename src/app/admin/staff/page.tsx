@@ -56,7 +56,7 @@ export default function StaffPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-3xl tracking-widest">STAFF</h1>
+      <h1 className="serif text-4xl font-semibold tracking-tight">Staff</h1>
       <p className="text-sm text-ink-dim">
         Add staff, assign roles, deactivate. PINs are stored in plaintext in this in-memory store
         for development. Hash with Better Auth or Clerk before launch.

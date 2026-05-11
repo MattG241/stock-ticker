@@ -31,7 +31,7 @@ export default function MarketPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-3xl tracking-widest">MARKET PARAMETERS</h1>
+      <h1 className="serif text-4xl font-semibold tracking-tight">Market Parameters</h1>
       <p className="text-sm text-ink-dim">Applies on the next tick (every 2 seconds).</p>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">

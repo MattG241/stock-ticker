@@ -36,10 +36,10 @@ export function DrinkCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-base font-semibold leading-tight">{drink.name}</div>
+          <div className="truncate serif text-lg font-semibold leading-tight tracking-tight">{drink.name}</div>
           <div className="mt-1 flex items-center gap-2">
             <span className="ticker-symbol">{drink.ticker}</span>
-            <span className="label">{drink.category}</span>
+            <span className="label-dim">{drink.category}</span>
           </div>
         </div>
         <span className={`num text-[10px] font-medium leading-none ${up ? "text-bull" : "text-bear"}`}>
@@ -59,7 +59,7 @@ export function DrinkCard({
               </div>
             </>
           ) : (
-            <div className="num text-2xl font-semibold">{formatAud(drink.displayPrice)}</div>
+            <div className="num text-2xl font-semibold text-ink">{formatAud(drink.displayPrice)}</div>
           )}
         </div>
         <div className="flex flex-col items-end gap-0.5">

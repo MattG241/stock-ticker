@@ -38,12 +38,15 @@ export function BiggestMoverCallout() {
   const up = mover.pctChange >= 0;
 
   return (
-    <div className="panel relative flex items-center gap-4 overflow-hidden border-bull/30 px-5 py-3">
-      <div className="absolute inset-y-0 left-0 w-1 bg-bull" style={up ? {} : { background: "#FF4757" }} />
+    <div className="panel-brass relative flex items-center gap-4 overflow-hidden px-5 py-3">
+      <div
+        className="absolute inset-y-0 left-0 w-1"
+        style={{ background: up ? "#00B764" : "#C0322F" }}
+      />
       <span className="label">5-min mover</span>
       <span className="ticker-symbol-lg">{mover.ticker}</span>
       <div className="leading-tight">
-        <div className="text-sm font-semibold">{mover.name}</div>
+        <div className="serif text-base font-semibold text-ink">{mover.name}</div>
         <div className="num text-[11px] text-ink-dim">
           {formatAud(mover.fromPrice)} → {formatAud(mover.toPrice)}
         </div>

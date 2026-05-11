@@ -111,7 +111,7 @@ export default function CrashCentre() {
   return (
     <div className="space-y-6">
       <section className="card">
-        <h1 className="font-display text-3xl tracking-widest">CRASH CENTRE</h1>
+        <h1 className="serif text-4xl font-semibold tracking-tight">Crash Centre</h1>
         <p className="mt-1 text-sm text-ink-dim">Trigger a market-wide discount across every dynamic drink.</p>
 
         <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">

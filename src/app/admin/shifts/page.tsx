@@ -42,7 +42,7 @@ export default function ShiftsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-3xl tracking-widest">SHIFTS</h1>
+      <h1 className="serif text-4xl font-semibold tracking-tight">Shifts</h1>
       <section className="card">
         <div className="flex items-center justify-between">
           <div>
@@ -71,7 +71,7 @@ export default function ShiftsPage() {
 
       {zReport && (
         <section className="card">
-          <h2 className="font-display text-2xl tracking-widest">Z-REPORT</h2>
+          <h2 className="serif text-3xl font-semibold tracking-tight">Z-Report</h2>
           <ul className="mt-3 grid grid-cols-2 gap-2 text-sm md:grid-cols-3">
             <li><span className="text-ink-dim">Revenue</span> <span className="num ml-2">{formatAud(zReport.revenue)}</span></li>
             <li><span className="text-ink-dim">Ex-GST</span> <span className="num ml-2">{formatAud(zReport.subtotalExGst)}</span></li>

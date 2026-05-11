@@ -34,31 +34,27 @@ export function JustSoldStrip() {
     };
   }, []);
 
-  if (sales.length === 0) {
-    return (
-      <div className="flex items-center gap-3 border-b border-edge bg-bg-card/40 px-6 py-1.5">
-        <span className="label text-ink-dim">Recent prints</span>
-        <span className="num text-[11px] uppercase tracking-[0.18em] text-ink-ghost">[ awaiting orders ]</span>
-      </div>
-    );
-  }
   return (
-    <div className="flex items-center gap-3 overflow-x-auto border-b border-edge bg-bg-card/40 px-6 py-1.5">
-      <span className="label shrink-0 text-ink-dim">Recent prints</span>
-      <div className="flex gap-3">
-        {sales.map((s) => {
-          const ago = Math.max(1, Math.round((Date.now() - s.ts) / 1000));
-          return (
-            <span key={s.id} className="flex items-center gap-1.5 whitespace-nowrap text-[11px]">
-              <span className="num text-ink-dim">{ago}s</span>
-              <span className="num font-semibold text-bull">{s.quantity}x</span>
-              <span className="num text-ink">{s.ticker}</span>
-              <span className="num text-ink-dim">·</span>
-              <span className="num text-ink/80">{formatAud(s.total)}</span>
-            </span>
-          );
-        })}
-      </div>
+    <div className="flex items-center gap-3 overflow-x-auto border-b border-edge bg-black/40 px-6 py-1.5">
+      <span className="label shrink-0">Recent prints</span>
+      {sales.length === 0 ? (
+        <span className="num text-[11px] uppercase tracking-[0.22em] text-ink-ghost">[ awaiting orders ]</span>
+      ) : (
+        <div className="flex gap-3">
+          {sales.map((s) => {
+            const ago = Math.max(1, Math.round((Date.now() - s.ts) / 1000));
+            return (
+              <span key={s.id} className="flex items-center gap-1.5 whitespace-nowrap text-[11px]">
+                <span className="num text-ink-dim">{ago}s</span>
+                <span className="num font-semibold text-bull">{s.quantity}x</span>
+                <span className="num text-ink">{s.ticker}</span>
+                <span className="num text-ink-ghost">·</span>
+                <span className="num text-ink/80">{formatAud(s.total)}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

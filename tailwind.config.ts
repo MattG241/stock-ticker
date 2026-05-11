@@ -1,28 +1,44 @@
 import type { Config } from "tailwindcss";
 
+/**
+ * Palette per The Drink Exchange Brand Asset Book §04.
+ * Black market #0D0D0D, trading floor charcoal #171717, brass reserve #C5A352,
+ * ticker green #00B764, bull green #00A85E, bear red #C0322F,
+ * ivory ledger #F2E8D5, deep emerald leather #003432.
+ */
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        bull: "#22D48F",
-        "bull-dim": "#0B7A50",
-        bear: "#FF4757",
-        "bear-dim": "#7A1F26",
-        amber: "#F4B842",
+        // Surfaces
         bg: {
-          DEFAULT: "#06080B",
-          card: "#0B0F14",
-          elev: "#10161D",
-          glass: "rgba(13, 19, 27, 0.6)",
+          DEFAULT: "#0D0D0D",
+          card: "#171717",
+          elev: "#1F1F1F",
+          glass: "rgba(20, 20, 20, 0.7)",
+          emerald: "#003432",
         },
+        // Lines / edges
+        edge: "#2A2418",
+        "edge-bright": "#3A2F1B",
+        // Type
         ink: {
-          DEFAULT: "#E6E8EB",
-          dim: "#8A93A0",
-          ghost: "#4B5360",
+          DEFAULT: "#F2E8D5",
+          dim: "#A89B7E",
+          ghost: "#5C5340",
         },
-        edge: "#1A2027",
-        "edge-bright": "#252D36",
+        // Brand accents
+        brass: {
+          DEFAULT: "#C5A352",
+          dim: "#8C7438",
+          dark: "#5A4A23",
+        },
+        bull: "#00B764",
+        "bull-dim": "#007A42",
+        bear: "#C0322F",
+        "bear-dim": "#7A1F1D",
+        emerald: "#003432",
       },
       fontFamily: {
         sans: [
@@ -33,6 +49,14 @@ const config: Config = {
           "Segoe UI",
           "Roboto",
           "sans-serif",
+        ],
+        serif: [
+          "Playfair Display",
+          "Cormorant Garamond",
+          "Georgia",
+          "Cambria",
+          "Times New Roman",
+          "serif",
         ],
         mono: [
           "JetBrains Mono",
@@ -47,11 +71,9 @@ const config: Config = {
         ],
         display: ["Bebas Neue", "Inter", "sans-serif"],
       },
-      fontFeatureSettings: {
-        tabular: '"tnum", "lnum"',
-      },
       letterSpacing: {
         terminal: "0.18em",
+        brand: "0.32em",
       },
       keyframes: {
         flash: {
@@ -64,11 +86,11 @@ const config: Config = {
           "100%": { transform: "translateX(-50%)" },
         },
         priceUp: {
-          "0%": { backgroundColor: "rgba(34, 212, 143, 0.35)" },
+          "0%": { backgroundColor: "rgba(0, 183, 100, 0.35)" },
           "100%": { backgroundColor: "transparent" },
         },
         priceDown: {
-          "0%": { backgroundColor: "rgba(255, 71, 87, 0.35)" },
+          "0%": { backgroundColor: "rgba(192, 50, 47, 0.35)" },
           "100%": { backgroundColor: "transparent" },
         },
       },
@@ -77,6 +99,12 @@ const config: Config = {
         marquee: "marquee 45s linear infinite",
         "price-up": "priceUp 600ms ease-out",
         "price-down": "priceDown 600ms ease-out",
+      },
+      backgroundImage: {
+        "brass-gradient":
+          "linear-gradient(90deg, rgba(197,163,82,0) 0%, rgba(197,163,82,0.55) 50%, rgba(197,163,82,0) 100%)",
+        "emerald-haze":
+          "radial-gradient(circle at 50% 0%, rgba(0,52,50,0.45), transparent 55%)",
       },
     },
   },

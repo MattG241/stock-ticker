@@ -61,11 +61,12 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-edge bg-bg-card/50 px-6">
+      <header className="border-b border-edge bg-black/40 px-6">
         <div className="mx-auto flex max-w-6xl items-center justify-between py-3">
-          <Logo size={22} />
-          <span className="pill border-bull/40 text-bull">Live Dashboard</span>
+          <Logo size={20} />
+          <span className="pill border-brass/40 text-brass">Live Dashboard</span>
         </div>
+        <div className="brand-divider" />
       </header>
       <main className="mx-auto max-w-6xl space-y-4 p-6">
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">

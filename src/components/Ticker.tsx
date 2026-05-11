@@ -15,7 +15,7 @@ export function Ticker({
     const up = pct >= 0;
     return (
       <span key={d.id} className="inline-flex items-center gap-2 px-5">
-        <span className="num text-[11px] font-semibold tracking-[0.06em] text-ink">{d.ticker}</span>
+        <span className="num text-[11px] font-semibold tracking-[0.08em] text-brass">{d.ticker}</span>
         <span className={`num text-[12px] ${crash ? "text-bear" : "text-ink"}`}>
           {formatAud(d.displayPrice)}
         </span>
@@ -29,7 +29,7 @@ export function Ticker({
   });
   return (
     <div
-      className={`scroll-tape overflow-hidden whitespace-nowrap border-y border-edge bg-bg-card/60 py-1.5 ${
+      className={`scroll-tape overflow-hidden whitespace-nowrap border-y border-edge bg-black/40 py-1.5 ${
         crash ? "text-bear" : ""
       }`}
     >

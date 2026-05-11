@@ -28,7 +28,7 @@ export default function RefusalsPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-display text-3xl tracking-[0.28em]">RSA REFUSALS</h1>
+        <h1 className="serif text-4xl font-semibold tracking-tight">RSA Refusals</h1>
         <p className="mt-1 text-xs uppercase tracking-[0.18em] text-ink-dim">
           Logged refusals of service · Liquor Licensing Act 1997 (SA) audit requirement
         </p>

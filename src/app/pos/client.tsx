@@ -185,10 +185,13 @@ export function PosClient() {
             }
             setStaffId(data.staff.id);
           }}
-          className="panel w-full max-w-sm"
+          className="panel-brass frame-deco w-full max-w-sm"
         >
-          <Logo size={22} />
-          <h1 className="mt-6 text-xs uppercase tracking-[0.32em] text-ink-dim">Staff terminal</h1>
+          <div className="flex flex-col items-center gap-2">
+            <Logo size={20} variant="stacked" />
+          </div>
+          <div className="brand-divider mt-4" />
+          <h1 className="mt-4 text-center text-xs uppercase tracking-[0.32em] text-brass">Staff terminal</h1>
           <input
             type="password"
             inputMode="numeric"

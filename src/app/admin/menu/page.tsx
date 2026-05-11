@@ -30,8 +30,8 @@ export default function MenuPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-display text-3xl tracking-[0.28em]">MENU</h1>
-        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-ink-dim">
+        <h1 className="serif text-4xl font-semibold tracking-tight">Menu</h1>
+        <p className="mt-1 text-xs uppercase tracking-[0.22em] text-brass-dim">
           Toggle active state · edit base price · override the live price (logged in audit)
         </p>
       </div>

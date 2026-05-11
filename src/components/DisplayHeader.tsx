@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Logo } from "./Logo";
+import { Logo, BrandTagline } from "./Logo";
 import { formatAdelaide } from "@/lib/time";
 import type { SnapshotDrink } from "@/lib/snapshot";
 
@@ -31,12 +31,12 @@ export function DisplayHeader({ tradingOpen, marketIndexPct, drinks, connection 
   const indexUp = marketIndexPct >= 0;
 
   return (
-    <header className="border-b border-edge bg-bg-card/40">
+    <header className="border-b border-edge bg-black/40">
       <div className="flex items-center justify-between px-6 py-3">
-        <div className="flex items-center gap-6">
-          <Logo size={26} />
-          <span className="text-[10px] uppercase tracking-[0.32em] text-ink-dim">
-            Adelaide · AUD · TZ ACST/ACDT
+        <div className="flex items-center gap-5">
+          <Logo size={22} />
+          <span className="text-[10px] uppercase tracking-[0.32em] text-brass-dim">
+            Adelaide · AUD · ACST / ACDT
           </span>
         </div>
         <div className="flex items-center gap-5">
@@ -49,9 +49,12 @@ export function DisplayHeader({ tradingOpen, marketIndexPct, drinks, connection 
           <Stat label="Adv" value={advances.toString()} accent="bull" />
           <Stat label="Dec" value={declines.toString()} accent="bear" />
           <Stat label="Unch" value={unchanged.toString()} accent="dim" />
-          <Stat label="Clock" value={clock} accent="ink" mono />
+          <Stat label="Clock" value={clock} accent="ink" />
           <ConnectionDot status={connection} />
         </div>
+      </div>
+      <div className="flex items-center justify-center gap-3 pb-2">
+        <BrandTagline size="sm" />
       </div>
     </header>
   );
@@ -61,12 +64,10 @@ function Stat({
   label,
   value,
   accent,
-  mono,
 }: {
   label: string;
   value: string;
   accent: "bull" | "bear" | "dim" | "ink";
-  mono?: boolean;
 }) {
   const color =
     accent === "bull"
@@ -78,10 +79,8 @@ function Stat({
       : "text-ink";
   return (
     <div className="flex flex-col items-end leading-none">
-      <span className="label">{label}</span>
-      <span className={`${mono === false ? "" : "num"} mt-0.5 text-[13px] font-semibold ${color}`}>
-        {value}
-      </span>
+      <span className="label-dim">{label}</span>
+      <span className={`num mt-0.5 text-[13px] font-semibold ${color}`}>{value}</span>
     </div>
   );
 }
@@ -91,11 +90,11 @@ function ConnectionDot({ status }: { status: "connecting" | "live" | "offline" }
     status === "live"
       ? "bg-bull"
       : status === "connecting"
-      ? "bg-amber animate-pulse"
+      ? "bg-brass animate-pulse"
       : "bg-bear animate-pulse";
   const label = status === "live" ? "LIVE" : status === "connecting" ? "SYNC" : "OFF";
   return (
-    <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-ink-dim">
+    <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.22em] text-brass-dim">
       <span className={`h-1.5 w-1.5 rounded-full ${cls}`} />
       {label}
     </span>

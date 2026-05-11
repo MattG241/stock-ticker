@@ -33,7 +33,7 @@ export function Sparkline({ points, basePrice, width = 120, height = 32, showRan
   }, [points, basePrice, width, height]);
 
   const last = points.at(-1)?.price ?? basePrice;
-  const stroke = last >= basePrice ? "#22D48F" : "#FF4757";
+  const stroke = last >= basePrice ? "#00B764" : "#C0322F";
 
   if (!layout) {
     return <svg width={width} height={height} className="overflow-visible" />;
@@ -46,14 +46,14 @@ export function Sparkline({ points, basePrice, width = 120, height = 32, showRan
         x2={width}
         y1={layout.baseY}
         y2={layout.baseY}
-        stroke="#252D36"
+        stroke="#3A2F1B"
         strokeDasharray="1 3"
         strokeWidth={1}
       />
       <path d={layout.path} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" />
       <circle cx={layout.lastX} cy={layout.lastY} r={2} fill={stroke} />
       {showRange && (
-        <g className="num" fontSize="8" fill="#4B5360">
+        <g className="num" fontSize="8" fill="#5C5340">
           <text x={0} y={9} textAnchor="start">{layout.hi.toFixed(2)}</text>
           <text x={0} y={height - 1} textAnchor="start">{layout.lo.toFixed(2)}</text>
         </g>
