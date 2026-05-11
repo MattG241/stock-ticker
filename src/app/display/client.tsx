@@ -62,7 +62,12 @@ export function DisplayClient() {
           <span>[ tap to enable audio · or load ?audio=skip ]</span>
         </button>
       )}
-      <CrashOverlay active={crashActive} discountPercent={discount} remainingSeconds={remaining} />
+      <CrashOverlay
+        active={crashActive}
+        discountPercent={discount}
+        remainingSeconds={remaining}
+        triggeredVia={state.crash.event?.triggeredVia}
+      />
       <DisplayHeader
         tradingOpen={state.tradingOpen}
         marketIndexPct={state.marketIndexPct}

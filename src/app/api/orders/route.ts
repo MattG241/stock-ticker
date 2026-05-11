@@ -23,6 +23,10 @@ const schema = z.object({
     .optional(),
   idempotencyKey: z.string().optional(),
   cashTendered: z.number().nonnegative().max(100_000).optional(),
+  tipAmount: z.number().nonnegative().max(1000).optional(),
+  discountAmount: z.number().nonnegative().max(10_000).optional(),
+  discountReason: z.string().min(1).max(200).optional(),
+  managerPin: z.string().regex(/^\d{4,8}$/).optional(),
 });
 
 export const dynamic = "force-dynamic";

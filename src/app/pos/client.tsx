@@ -3,12 +3,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveState } from "@/lib/hooks/useLiveState";
 import { formatAud, roundCashAud } from "@/lib/money";
 import { Logo } from "@/components/Logo";
+import { CrashBanner } from "@/components/CrashBanner";
+import { QrImage } from "@/components/QrImage";
+import type { DrinkCategory } from "@/lib/types";
 
 interface CartLine {
   drinkId: string;
   ticker: string;
   name: string;
-  unit: number; // price quoted to the customer when added
+  unit: number;
   quantity: number;
 }
 
@@ -23,6 +26,10 @@ interface QueuedOrder {
     idempotencyKey: string;
     idCheck?: boolean;
     cashTendered?: number;
+    tipAmount?: number;
+    discountAmount?: number;
+    discountReason?: string;
+    managerPin?: string;
   };
   attemptCount: number;
   lastAttemptAt: number;
@@ -43,7 +50,14 @@ interface RecentOrder {
   total: number;
   status: string;
   createdAt: string;
-  lines: { drinkNameSnapshot: string; quantity: number }[];
+  paymentMethod: string;
+  lines: { drinkId: string; drinkNameSnapshot: string; quantity: number }[];
+}
+
+interface LastOrder {
+  items: { drinkId: string; quantity: number }[];
+  orderNumber: number;
+  ts: number;
 }
 
 const QUEUE_KEY = "drink-exchange-pos-queue";
@@ -52,9 +66,21 @@ const CART_KEY = "drink-exchange-pos-cart";
 const ACTIVE_TAB_KEY = "drink-exchange-pos-active-tab";
 const PAYMENT_METHOD_KEY = "drink-exchange-pos-pm";
 const IDEMPOTENCY_KEY = "drink-exchange-pos-idem";
+const LAST_ORDER_KEY = "drink-exchange-pos-last";
 const QTY_PRESETS = [4, 6, 8];
 const MAX_DRAIN_ATTEMPTS = 5;
 const CLOSE_WARNING_MIN = 10;
+const TIP_PRESETS = [0.1, 0.15, 0.2];
+
+const ALL_CATEGORIES: (DrinkCategory | "All")[] = [
+  "All",
+  "Cocktails",
+  "Beer",
+  "Wine",
+  "Spirits",
+  "Shots",
+  "Non-Alc",
+];
 
 function newIdempotencyKey() {
   return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -65,7 +91,6 @@ function parseHM(s: string): { h: number; m: number } {
   return { h: h ?? 0, m: m ?? 0 };
 }
 
-// Adelaide local time as minutes-since-midnight, computed client-side.
 function adelaideMinutesNow(): number {
   const fmt = new Intl.DateTimeFormat("en-AU", {
     timeZone: "Australia/Adelaide",
@@ -87,7 +112,7 @@ function isWithinTradingHoursClient(open: string, close: string): boolean {
   const c = ch * 60 + cm;
   if (o === c) return true;
   if (o < c) return cur >= o && cur < c;
-  return cur >= o || cur < c; // overnight
+  return cur >= o || cur < c;
 }
 
 function minutesUntilClose(close: string): number {
@@ -115,6 +140,15 @@ export function PosClient() {
   const [queue, setQueue] = useState<QueuedOrder[]>([]);
   const [online, setOnline] = useState(true);
 
+  // Filters
+  const [search, setSearch] = useState("");
+  const [activeCategory, setActiveCategory] = useState<DrinkCategory | "All">("All");
+
+  // Modals
+  const [tabModal, setTabModal] = useState(false);
+  const [tabName, setTabName] = useState("");
+  const [tabIdCheck, setTabIdCheck] = useState(false);
+
   const [voidTarget, setVoidTarget] = useState<string | null>(null);
   const [voidPin, setVoidPin] = useState("");
   const [voidReason, setVoidReason] = useState("");
@@ -122,10 +156,11 @@ export function PosClient() {
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
 
-  const [search, setSearch] = useState("");
-  const [tabModal, setTabModal] = useState(false);
-  const [tabName, setTabName] = useState("");
-  const [tabIdCheck, setTabIdCheck] = useState(false);
+  const [refundTarget, setRefundTarget] = useState<RecentOrder | null>(null);
+  const [refundPin, setRefundPin] = useState("");
+  const [refundAmount, setRefundAmount] = useState("");
+  const [refundPickerOpen, setRefundPickerOpen] = useState(false);
+
   const [refusalOpen, setRefusalOpen] = useState(false);
   const [refusalReason, setRefusalReason] = useState<"intoxication" | "id" | "behaviour" | "other">(
     "intoxication",
@@ -136,7 +171,35 @@ export function PosClient() {
   const [cashOpen, setCashOpen] = useState(false);
   const [cashInput, setCashInput] = useState("");
 
-  // Refresh "now" once a minute to drive the closing countdown.
+  const [tipOpen, setTipOpen] = useState(false);
+  const [tipCustom, setTipCustom] = useState("");
+
+  const [compOpen, setCompOpen] = useState(false);
+  const [compMode, setCompMode] = useState<"$" | "%">("$");
+  const [compInput, setCompInput] = useState("");
+  const [compReason, setCompReason] = useState("");
+  const [compPin, setCompPin] = useState("");
+  const [pendingDiscount, setPendingDiscount] = useState<{
+    amount: number;
+    reason: string;
+    managerPin: string;
+  } | null>(null);
+
+  const [outOfStockTarget, setOutOfStockTarget] = useState<{ id: string; name: string } | null>(
+    null,
+  );
+  const [outOfStockPin, setOutOfStockPin] = useState("");
+
+  const [lastOrder, setLastOrder] = useState<LastOrder | null>(null);
+
+  const [successOpen, setSuccessOpen] = useState<{
+    id: string;
+    orderNumber: number;
+    total: number;
+    change: number | null;
+  } | null>(null);
+
+  // Clock tick for closing countdown.
   const [, setClockTick] = useState(0);
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -144,7 +207,7 @@ export function PosClient() {
   const drainRef = useRef(false);
   const idempotencyRef = useRef<string | null>(null);
 
-  // Boot: restore persisted session/cart from localStorage.
+  // Boot from localStorage.
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -164,8 +227,10 @@ export function PosClient() {
       if (idem) idempotencyRef.current = idem;
       const q = window.localStorage.getItem(QUEUE_KEY);
       if (q) setQueue(JSON.parse(q));
+      const last = window.localStorage.getItem(LAST_ORDER_KEY);
+      if (last) setLastOrder(JSON.parse(last));
     } catch {
-      // Corrupt localStorage - ignore.
+      // ignore
     }
     setOnline(navigator.onLine);
     const onOnline = () => setOnline(true);
@@ -180,7 +245,6 @@ export function PosClient() {
     };
   }, []);
 
-  // Persist things on change.
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (staffId) {
@@ -211,7 +275,12 @@ export function PosClient() {
     window.localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
   }, [queue]);
 
-  // Drain the offline queue. Locked, with per-item backoff + retry cap.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (lastOrder) window.localStorage.setItem(LAST_ORDER_KEY, JSON.stringify(lastOrder));
+  }, [lastOrder]);
+
+  // Drain offline queue.
   useEffect(() => {
     if (!online || queue.length === 0) return;
     if (drainRef.current) return;
@@ -224,11 +293,13 @@ export function PosClient() {
         for (const q of items) {
           if (cancelled) break;
           if (q.attemptCount >= MAX_DRAIN_ATTEMPTS) {
-            setToast({ kind: "err", msg: `Dropped queued order after ${MAX_DRAIN_ATTEMPTS} retries` });
+            setToast({
+              kind: "err",
+              msg: `Dropped queued order after ${MAX_DRAIN_ATTEMPTS} retries`,
+            });
             setQueue((cur) => cur.filter((x) => x.id !== q.id));
             continue;
           }
-          // Per-item backoff: 0, 2, 4, 8, 16 seconds.
           if (q.attemptCount > 0) {
             const backoffMs = Math.min(16_000, 2_000 * 2 ** (q.attemptCount - 1));
             if (Date.now() - q.lastAttemptAt < backoffMs) continue;
@@ -243,7 +314,10 @@ export function PosClient() {
               setQueue((cur) => cur.filter((x) => x.id !== q.id));
             } else if (res.status === 422) {
               const data = await res.json().catch(() => ({}));
-              setToast({ kind: "err", msg: `Queued order rejected: ${data.reason ?? "unknown"}` });
+              setToast({
+                kind: "err",
+                msg: `Queued order rejected: ${data.reason ?? "unknown"}`,
+              });
               setQueue((cur) => cur.filter((x) => x.id !== q.id));
             } else {
               setQueue((cur) =>
@@ -262,7 +336,7 @@ export function PosClient() {
                   : x,
               ),
             );
-            break; // network down - bail out
+            break;
           }
         }
       } finally {
@@ -275,7 +349,7 @@ export function PosClient() {
     };
   }, [online, queue]);
 
-  // Poll tabs every 4s while signed in AND online.
+  // Tabs polling.
   useEffect(() => {
     if (!staffId || !online) return;
     let alive = true;
@@ -293,7 +367,7 @@ export function PosClient() {
           );
         }
       } catch {
-        // ignore - polling will retry
+        // ignore
       }
     };
     load();
@@ -305,7 +379,9 @@ export function PosClient() {
   }, [staffId, online]);
 
   const crashActive = state?.crash.active ?? false;
-  const discount = state?.crash.event?.discountPercent ?? 0;
+  const crashEvent = state?.crash.event;
+  const crashRemaining = state?.crash.remainingSeconds ?? 0;
+  const discount = crashEvent?.discountPercent ?? 0;
   const floor = state?.settings.minMarginMultiplier ?? 0.3;
 
   const tradingClose = state?.settings.tradingClose;
@@ -319,7 +395,6 @@ export function PosClient() {
     return minutesUntilClose(tradingClose);
   }, [tradingClose, isOpen]);
 
-  // The active tab, if any, with its existing lines.
   const activeTab = useMemo(
     () => openTabs.find((t) => t.id === activeTabId) ?? null,
     [openTabs, activeTabId],
@@ -332,6 +407,8 @@ export function PosClient() {
         newSubtotal: 0,
         tabSubtotal: 0,
         combinedSubtotal: 0,
+        discountAmount: 0,
+        afterDiscountSubtotal: 0,
         cashTotal: 0,
       };
     }
@@ -343,7 +420,6 @@ export function PosClient() {
           : d.currentPrice
         : l.unit;
       const liveUnit = Math.round(live * 100) / 100;
-      // Charge the customer the price they were QUOTED (l.unit).
       const lineTotal = Math.round(l.unit * l.quantity * 100) / 100;
       const moved = Math.abs(liveUnit - l.unit) > 0.01;
       return { ...l, liveUnit, lineTotal, moved };
@@ -351,20 +427,34 @@ export function PosClient() {
     const newSubtotal = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
     const tabSubtotal = activeTab ? Math.round(activeTab.subtotal * 100) / 100 : 0;
     const combinedSubtotal = Math.round((newSubtotal + tabSubtotal) * 100) / 100;
-    return { lines, newSubtotal, tabSubtotal, combinedSubtotal, cashTotal: roundCashAud(combinedSubtotal) };
-  }, [cart, state, crashActive, discount, floor, activeTab]);
+    const discountAmount = pendingDiscount
+      ? Math.min(pendingDiscount.amount, combinedSubtotal)
+      : 0;
+    const afterDiscountSubtotal = Math.round((combinedSubtotal - discountAmount) * 100) / 100;
+    return {
+      lines,
+      newSubtotal,
+      tabSubtotal,
+      combinedSubtotal,
+      discountAmount,
+      afterDiscountSubtotal,
+      cashTotal: roundCashAud(afterDiscountSubtotal),
+    };
+  }, [cart, state, crashActive, discount, floor, activeTab, pendingDiscount]);
 
   const filteredDrinks = useMemo(() => {
     if (!state) return [];
     const q = search.trim().toLowerCase();
-    if (!q) return state.drinks;
-    return state.drinks.filter(
-      (d) =>
+    return state.drinks.filter((d) => {
+      if (activeCategory !== "All" && d.category !== activeCategory) return false;
+      if (!q) return true;
+      return (
         d.name.toLowerCase().includes(q) ||
         d.ticker.toLowerCase().includes(q) ||
-        d.category.toLowerCase().includes(q),
-    );
-  }, [state, search]);
+        d.category.toLowerCase().includes(q)
+      );
+    });
+  }, [state, search, activeCategory]);
 
   const ensureIdempotencyKey = useCallback(() => {
     if (!idempotencyRef.current) {
@@ -411,7 +501,9 @@ export function PosClient() {
             <Logo size={20} variant="stacked" />
           </div>
           <div className="brand-divider mt-4" />
-          <h1 className="mt-4 text-center text-xs uppercase tracking-[0.32em] text-brass">Staff terminal</h1>
+          <h1 className="mt-4 text-center text-xs uppercase tracking-[0.32em] text-brass">
+            Staff terminal
+          </h1>
           <input
             type="password"
             inputMode="numeric"
@@ -423,7 +515,9 @@ export function PosClient() {
             autoFocus
           />
           <button className="btn-primary mt-3 w-full">Sign in</button>
-          {pinError && <p className="mt-3 text-xs uppercase tracking-[0.18em] text-bear">{pinError}</p>}
+          {pinError && (
+            <p className="mt-3 text-xs uppercase tracking-[0.18em] text-bear">{pinError}</p>
+          )}
         </form>
       </main>
     );
@@ -434,7 +528,6 @@ export function PosClient() {
   const signOut = () => {
     setStaffId(null);
     setStaffRole(null);
-    // Preserve cart + queue so a returning staffer doesn't lose work.
   };
 
   const addToCart = (drinkId: string, ticker: string, name: string, unit: number, qty = 1) => {
@@ -442,7 +535,6 @@ export function PosClient() {
     setCart((c) => {
       const ex = c.find((l) => l.drinkId === drinkId);
       if (ex) {
-        // Keep the originally-quoted unit price; only quantity grows.
         return c.map((l) => (l.drinkId === drinkId ? { ...l, quantity: l.quantity + qty } : l));
       }
       return [...c, { drinkId, ticker, name, unit, quantity: qty }];
@@ -450,13 +542,9 @@ export function PosClient() {
   };
 
   const setQuantity = (drinkId: string, qty: number) => {
-    if (qty <= 0) {
-      setCart((c) => c.filter((l) => l.drinkId !== drinkId));
-    } else if (qty > 99) {
-      setCart((c) => c.map((l) => (l.drinkId === drinkId ? { ...l, quantity: 99 } : l)));
-    } else {
-      setCart((c) => c.map((l) => (l.drinkId === drinkId ? { ...l, quantity: qty } : l)));
-    }
+    if (qty <= 0) setCart((c) => c.filter((l) => l.drinkId !== drinkId));
+    else if (qty > 99) setCart((c) => c.map((l) => (l.drinkId === drinkId ? { ...l, quantity: 99 } : l)));
+    else setCart((c) => c.map((l) => (l.drinkId === drinkId ? { ...l, quantity: qty } : l)));
   };
 
   const requoteCart = () => {
@@ -474,9 +562,40 @@ export function PosClient() {
     );
   };
 
-  const sendOrder = async (cashTendered?: number) => {
+  const repeatLastOrder = () => {
+    if (!lastOrder || !state) return;
+    const newCart: CartLine[] = [];
+    for (const item of lastOrder.items) {
+      const d = state.drinks.find((x) => x.id === item.drinkId);
+      if (!d || !d.isActive) continue;
+      const live = roundCashAud(
+        d.isDynamic && crashActive
+          ? Math.max(d.currentPrice * (1 - discount), d.costPrice * (1 + floor))
+          : d.currentPrice,
+      );
+      newCart.push({
+        drinkId: d.id,
+        ticker: d.ticker,
+        name: d.name,
+        unit: Math.round(d.displayPrice * 100) / 100,
+        quantity: item.quantity,
+      });
+      // (live used to mute lint; intentionally unused here)
+      void live;
+    }
+    if (!newCart.length) {
+      setToast({ kind: "err", msg: "Last order's drinks are no longer available" });
+      return;
+    }
+    setCart(newCart);
+    setActiveTabId(null);
+    ensureIdempotencyKey();
+    setToast({ kind: "ok", msg: `Loaded last order (#${lastOrder.orderNumber})` });
+  };
+
+  const sendOrder = async (opts?: { cashTendered?: number; tipAmount?: number }) => {
     if (!cartView.lines.length && !activeTabId) return;
-    if (chargingRef.current) return; // synchronous lock
+    if (chargingRef.current) return;
     chargingRef.current = true;
     setCharging(true);
 
@@ -494,7 +613,11 @@ export function PosClient() {
         ? { channel: receiptTo.includes("@") ? ("email" as const) : ("sms" as const), to: receiptTo }
         : undefined,
       idempotencyKey,
-      cashTendered: paymentMethod === "cash" ? cashTendered : undefined,
+      cashTendered: paymentMethod === "cash" ? opts?.cashTendered : undefined,
+      tipAmount: paymentMethod === "card" ? opts?.tipAmount : undefined,
+      discountAmount: pendingDiscount?.amount,
+      discountReason: pendingDiscount?.reason,
+      managerPin: pendingDiscount?.managerPin,
     };
 
     try {
@@ -508,20 +631,26 @@ export function PosClient() {
       if (!res.ok || !data.ok) {
         setToast({ kind: "err", msg: data.reason ?? "Order failed" });
       } else {
+        // Remember last order for "Repeat last".
+        setLastOrder({
+          items: cartView.lines.map((l) => ({ drinkId: l.drinkId, quantity: l.quantity })),
+          orderNumber: data.order.orderNumber,
+          ts: Date.now(),
+        });
         const change =
-          paymentMethod === "cash" && typeof cashTendered === "number"
-            ? Math.max(0, cashTendered - data.order.total)
+          paymentMethod === "cash" && typeof opts?.cashTendered === "number"
+            ? Math.max(0, opts.cashTendered - data.order.total)
             : null;
-        setToast({
-          kind: "ok",
-          msg:
-            change !== null
-              ? `Order #${data.order.orderNumber} · ${formatAud(data.order.total)} · Change ${formatAud(change)}`
-              : `Order #${data.order.orderNumber} · ${formatAud(data.order.total)}`,
+        setSuccessOpen({
+          id: data.order.id,
+          orderNumber: data.order.orderNumber,
+          total: data.order.total,
+          change,
         });
         setCart([]);
         setActiveTabId(null);
         setReceiptTo("");
+        setPendingDiscount(null);
         clearIdempotencyKey();
         refresh();
       }
@@ -536,6 +665,7 @@ export function PosClient() {
       setToast({ kind: "ok", msg: "Queued offline · will send on reconnect" });
       setCart([]);
       setActiveTabId(null);
+      setPendingDiscount(null);
       clearIdempotencyKey();
     } finally {
       chargingRef.current = false;
@@ -551,9 +681,10 @@ export function PosClient() {
     if (paymentMethod === "cash") {
       setCashInput("");
       setCashOpen(true);
-      return;
+    } else {
+      setTipCustom("");
+      setTipOpen(true);
     }
-    sendOrder();
   };
 
   const confirmCashTendered = () => {
@@ -563,7 +694,12 @@ export function PosClient() {
       return;
     }
     setCashOpen(false);
-    sendOrder(v);
+    sendOrder({ cashTendered: v });
+  };
+
+  const confirmTip = (tipAmount: number) => {
+    setTipOpen(false);
+    sendOrder({ tipAmount });
   };
 
   const saveAsTab = () => {
@@ -618,6 +754,7 @@ export function PosClient() {
   const resumeTab = (tab: Tab) => {
     setActiveTabId(tab.id);
     setCart([]);
+    setPendingDiscount(null);
     clearIdempotencyKey();
     ensureIdempotencyKey();
     setToast({ kind: "ok", msg: `Resumed tab #${tab.orderNumber}` });
@@ -626,6 +763,7 @@ export function PosClient() {
   const exitTab = () => {
     setActiveTabId(null);
     setCart([]);
+    setPendingDiscount(null);
     clearIdempotencyKey();
   };
 
@@ -650,6 +788,11 @@ export function PosClient() {
     loadRecentOrders();
   };
 
+  const openRefundPicker = () => {
+    setRefundPickerOpen(true);
+    loadRecentOrders();
+  };
+
   const voidOrder = async () => {
     if (!voidTarget) return;
     try {
@@ -670,6 +813,33 @@ export function PosClient() {
     setVoidTarget(null);
     setVoidPin("");
     setVoidReason("");
+  };
+
+  const submitRefund = async () => {
+    if (!refundTarget) return;
+    const amount = parseFloat(refundAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setToast({ kind: "err", msg: "Amount must be > 0" });
+      return;
+    }
+    try {
+      const res = await fetch(`/api/orders/${refundTarget.id}/refund`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: refundPin, amount }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setToast({ kind: "err", msg: data.reason ?? "Refund failed" });
+      } else {
+        setToast({ kind: "ok", msg: `Refunded ${formatAud(amount)} on #${data.order.orderNumber}` });
+        setRefundTarget(null);
+        setRefundPin("");
+        setRefundAmount("");
+      }
+    } catch {
+      setToast({ kind: "err", msg: "Network error during refund" });
+    }
   };
 
   const submitRefusal = async () => {
@@ -701,11 +871,86 @@ export function PosClient() {
     setRefusalPin("");
   };
 
-  const cashRoundDelta = cartView.cashTotal - cartView.combinedSubtotal;
+  const submitComp = () => {
+    const value = parseFloat(compInput);
+    if (!Number.isFinite(value) || value <= 0) {
+      setToast({ kind: "err", msg: "Comp amount must be > 0" });
+      return;
+    }
+    if (!compReason.trim()) {
+      setToast({ kind: "err", msg: "Reason required" });
+      return;
+    }
+    if (!compPin) {
+      setToast({ kind: "err", msg: "Manager PIN required" });
+      return;
+    }
+    const amount =
+      compMode === "%"
+        ? Math.round(cartView.combinedSubtotal * (value / 100) * 100) / 100
+        : Math.min(value, cartView.combinedSubtotal);
+    setPendingDiscount({ amount, reason: compReason.trim(), managerPin: compPin });
+    setCompOpen(false);
+    setCompInput("");
+    setCompReason("");
+    setCompPin("");
+    setToast({ kind: "ok", msg: `Comp applied: −${formatAud(amount)}` });
+  };
+
+  const submitOutOfStock = async () => {
+    if (!outOfStockTarget || !outOfStockPin) {
+      setToast({ kind: "err", msg: "Manager PIN required" });
+      return;
+    }
+    // Verify PIN via the auth endpoint (manager-or-above).
+    try {
+      const authRes = await fetch("/api/auth/pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: outOfStockPin }),
+      });
+      const authData = await authRes.json();
+      if (
+        !authRes.ok ||
+        !authData.ok ||
+        !["manager", "admin", "owner"].includes(authData.staff?.role)
+      ) {
+        setToast({ kind: "err", msg: "Manager PIN required" });
+        return;
+      }
+      const res = await fetch("/api/drinks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: outOfStockTarget.id, isActive: false }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setToast({ kind: "err", msg: data.reason ?? "Could not 86 drink" });
+      } else {
+        setToast({ kind: "ok", msg: `${outOfStockTarget.name} is out of stock` });
+      }
+    } catch {
+      setToast({ kind: "err", msg: "Network error" });
+    }
+    setOutOfStockTarget(null);
+    setOutOfStockPin("");
+  };
+
+  const cashRoundDelta = cartView.cashTotal - cartView.afterDiscountSubtotal;
 
   return (
     <main className="grid h-screen grid-cols-[1fr_22rem] bg-bg">
       <section className="overflow-y-auto p-3">
+        {crashActive && (
+          <div className="mb-2">
+            <CrashBanner
+              active={crashActive}
+              discountPercent={discount}
+              remainingSeconds={crashRemaining}
+              triggeredVia={crashEvent?.triggeredVia}
+            />
+          </div>
+        )}
         <div className="mb-3 flex items-center justify-between gap-3">
           <Logo size={18} />
           <input
@@ -717,16 +962,13 @@ export function PosClient() {
           />
           <div className="flex items-center gap-2">
             {!online && (
-              <span className="pill border-amber/40 text-amber">Offline · queued {queue.length}</span>
+              <span className="pill border-amber/40 text-amber">
+                Offline · queued {queue.length}
+              </span>
             )}
             {state.connectionStatus !== "live" && online && (
               <span className="pill border-amber/40 text-amber">
                 {state.connectionStatus.toUpperCase()}
-              </span>
-            )}
-            {crashActive && (
-              <span className="pill border-bear/40 text-bear">
-                Crash {Math.round(discount * 100)}%
               </span>
             )}
             {!isOpen && <span className="pill border-bear/40 text-bear">Market closed</span>}
@@ -736,6 +978,29 @@ export function PosClient() {
             <button className="btn" onClick={() => setRefusalOpen(true)}>RSA refuse</button>
             <button className="btn" onClick={signOut}>Sign out</button>
           </div>
+        </div>
+
+        <div className="mb-2 flex flex-wrap items-center gap-1">
+          {ALL_CATEGORIES.map((c) => (
+            <button
+              key={c}
+              onClick={() => setActiveCategory(c)}
+              className={`btn px-2 py-1 text-[10px] ${
+                activeCategory === c ? "border-bull text-bull" : ""
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+          {lastOrder && (
+            <button
+              onClick={repeatLastOrder}
+              className="btn ml-auto px-2 py-1 text-[10px]"
+              title={`Reorder items from #${lastOrder.orderNumber}`}
+            >
+              ↻ Repeat last (#{lastOrder.orderNumber})
+            </button>
+          )}
         </div>
 
         {openTabs.length > 0 && (
@@ -761,7 +1026,7 @@ export function PosClient() {
             return (
               <div
                 key={d.id}
-                className="panel-tight flex flex-col gap-2 text-left transition active:scale-[0.98]"
+                className="panel-tight relative flex flex-col gap-2 text-left transition active:scale-[0.98]"
               >
                 <button
                   onClick={() => addToCart(d.id, d.ticker, d.name, unit)}
@@ -774,7 +1039,9 @@ export function PosClient() {
                     <span className="label">{d.category}</span>
                   </div>
                   <div
-                    className={`mt-2 num text-xl font-semibold ${crashActive && d.isDynamic ? "text-bear" : ""}`}
+                    className={`mt-2 num text-xl font-semibold ${
+                      crashActive && d.isDynamic ? "text-bear" : ""
+                    }`}
                   >
                     {formatAud(unit)}
                   </div>
@@ -791,12 +1058,19 @@ export function PosClient() {
                     </button>
                   ))}
                 </div>
+                <button
+                  onClick={() => setOutOfStockTarget({ id: d.id, name: d.name })}
+                  className="absolute right-1 top-1 rounded-sm border border-edge px-1 py-0 text-[9px] uppercase tracking-[0.18em] text-ink-dim hover:border-bear hover:text-bear"
+                  title="86 this drink"
+                >
+                  86
+                </button>
               </div>
             );
           })}
           {filteredDrinks.length === 0 && (
             <div className="col-span-full num text-[11px] uppercase tracking-[0.18em] text-ink-dim">
-              [ no drinks match &ldquo;{search}&rdquo; ]
+              [ no drinks match ]
             </div>
           )}
         </div>
@@ -809,7 +1083,7 @@ export function PosClient() {
           </h2>
           <div className="flex items-center gap-2">
             <button
-              className="text-[10px] uppercase tracking-[0.18em] text-ink-dim hover:text-amber"
+              className="text-[10px] uppercase tracking-[0.18em] text-ink-dim hover:text-amber disabled:opacity-30"
               onClick={requoteCart}
               disabled={!cart.length}
             >
@@ -819,6 +1093,7 @@ export function PosClient() {
               className="text-[10px] uppercase tracking-[0.18em] text-ink-dim hover:text-bear"
               onClick={() => {
                 setCart([]);
+                setPendingDiscount(null);
                 if (activeTabId) exitTab();
                 clearIdempotencyKey();
               }}
@@ -830,7 +1105,9 @@ export function PosClient() {
 
         {activeTab && activeTab.lines.length > 0 && (
           <div className="mt-3 rounded-sm border border-bull/30 bg-bull/5 p-2">
-            <div className="label text-bull">Tab #{activeTab.orderNumber} · {activeTab.notes ?? "tab"}</div>
+            <div className="label text-bull">
+              Tab #{activeTab.orderNumber} · {activeTab.notes ?? "tab"}
+            </div>
             <ul className="mt-1 space-y-0.5 text-[11px]">
               {activeTab.lines.map((l, i) => (
                 <li key={i} className="flex justify-between text-ink/80">
@@ -845,7 +1122,10 @@ export function PosClient() {
               <span>Existing tab total</span>
               <span className="num">{formatAud(cartView.tabSubtotal)}</span>
             </div>
-            <button onClick={exitTab} className="mt-2 text-[10px] uppercase tracking-[0.18em] text-ink-dim hover:text-bear">
+            <button
+              onClick={exitTab}
+              className="mt-2 text-[10px] uppercase tracking-[0.18em] text-ink-dim hover:text-bear"
+            >
               exit tab (don't close)
             </button>
           </div>
@@ -871,12 +1151,7 @@ export function PosClient() {
               </div>
               <div className="mt-2 flex items-center justify-between text-[11px]">
                 <div className="flex items-center gap-1">
-                  <button
-                    className="btn px-2 py-0.5"
-                    onClick={() => setQuantity(l.drinkId, l.quantity - 1)}
-                  >
-                    -
-                  </button>
+                  <button className="btn px-2 py-0.5" onClick={() => setQuantity(l.drinkId, l.quantity - 1)}>-</button>
                   <input
                     type="number"
                     min={0}
@@ -885,15 +1160,12 @@ export function PosClient() {
                     onChange={(e) => setQuantity(l.drinkId, parseInt(e.target.value, 10) || 0)}
                     className="w-10 rounded-sm px-1 py-0.5 num text-center"
                   />
-                  <button
-                    className="btn px-2 py-0.5"
-                    onClick={() => setQuantity(l.drinkId, l.quantity + 1)}
-                  >
-                    +
-                  </button>
+                  <button className="btn px-2 py-0.5" onClick={() => setQuantity(l.drinkId, l.quantity + 1)}>+</button>
                 </div>
                 <div className={`num ${l.moved ? "text-amber" : "text-ink-dim"}`}>
-                  {l.moved ? `quoted ${formatAud(l.unit)} · now ${formatAud(l.liveUnit)}/u` : `${formatAud(l.unit)}/u`}
+                  {l.moved
+                    ? `quoted ${formatAud(l.unit)} · now ${formatAud(l.liveUnit)}/u`
+                    : `${formatAud(l.unit)}/u`}
                 </div>
               </div>
             </div>
@@ -909,8 +1181,28 @@ export function PosClient() {
           )}
           <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-ink-dim">
             <span>Subtotal · inc GST</span>
-            <span className="num text-base font-semibold text-ink">{formatAud(cartView.combinedSubtotal)}</span>
+            <span className="num text-base font-semibold text-ink">
+              {formatAud(cartView.combinedSubtotal)}
+            </span>
           </div>
+          {pendingDiscount && cartView.discountAmount > 0 && (
+            <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-bull">
+              <span title={pendingDiscount.reason}>Comp · {pendingDiscount.reason}</span>
+              <button
+                onClick={() => setPendingDiscount(null)}
+                className="num hover:text-bear"
+                title="Remove comp"
+              >
+                −{formatAud(cartView.discountAmount)} ×
+              </button>
+            </div>
+          )}
+          {pendingDiscount && (
+            <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-ink-dim">
+              <span>After comp</span>
+              <span className="num">{formatAud(cartView.afterDiscountSubtotal)}</span>
+            </div>
+          )}
           {paymentMethod === "cash" && Math.abs(cashRoundDelta) > 0.001 && (
             <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-amber">
               <span>Cash · 5c round {cashRoundDelta > 0 ? "up" : "down"}</span>
@@ -955,18 +1247,33 @@ export function PosClient() {
                 ? "Charging..."
                 : !isOpen
                   ? "Market closed"
-                  : `Charge ${formatAud(paymentMethod === "cash" ? cartView.cashTotal : cartView.combinedSubtotal)}`}
+                  : `Charge ${formatAud(
+                      paymentMethod === "cash"
+                        ? cartView.cashTotal
+                        : cartView.afterDiscountSubtotal,
+                    )}`}
             </button>
           </div>
-          <button
-            onClick={openVoidPicker}
-            className="btn-danger w-full"
-          >
-            Manager void
-          </button>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              onClick={() => setCompOpen(true)}
+              disabled={!cartView.combinedSubtotal}
+              className="btn disabled:opacity-40"
+            >
+              Comp
+            </button>
+            <button onClick={openRefundPicker} className="btn">
+              Refund
+            </button>
+            <button onClick={openVoidPicker} className="btn-danger">
+              Void
+            </button>
+          </div>
           {toast && (
             <p
-              className={`text-[11px] uppercase tracking-[0.14em] ${toast.kind === "ok" ? "text-bull" : "text-bear"}`}
+              className={`text-[11px] uppercase tracking-[0.14em] ${
+                toast.kind === "ok" ? "text-bull" : "text-bear"
+              }`}
             >
               {toast.msg}
             </p>
@@ -1004,46 +1311,32 @@ export function PosClient() {
       )}
 
       {voidPickerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85 p-4">
-          <div className="panel w-full max-w-lg">
-            <div className="flex items-center justify-between">
-              <h3 className="label">Manager void · pick an order</h3>
-              <button onClick={loadRecentOrders} className="btn text-[10px]">refresh</button>
-            </div>
-            <div className="mt-3 max-h-80 overflow-y-auto">
-              {recentLoading && <p className="num text-[11px] text-ink-dim">[ loading... ]</p>}
-              {!recentLoading && recentOrders.length === 0 && (
-                <p className="num text-[11px] text-ink-dim">[ no paid orders to void ]</p>
-              )}
-              <ul className="space-y-1">
-                {recentOrders.map((o) => (
-                  <li key={o.id}>
-                    <button
-                      onClick={() => {
-                        setVoidTarget(o.id);
-                        setVoidPickerOpen(false);
-                      }}
-                      className="w-full rounded-sm border border-edge p-2 text-left hover:border-bear hover:bg-bear/5"
-                    >
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="num font-semibold">
-                          #{o.orderNumber.toString().padStart(4, "0")}
-                        </span>
-                        <span className="num">{formatAud(o.total)}</span>
-                      </div>
-                      <div className="mt-0.5 text-[10px] text-ink-dim">
-                        {o.lines.map((l) => `${l.quantity}x ${l.drinkNameSnapshot}`).join(", ")}
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="mt-3 flex justify-end">
-              <button onClick={() => setVoidPickerOpen(false)} className="btn">Close</button>
-            </div>
-          </div>
-        </div>
+        <PickerModal
+          title="Manager void · pick an order"
+          recentOrders={recentOrders}
+          recentLoading={recentLoading}
+          onPick={(o) => {
+            setVoidTarget(o.id);
+            setVoidPickerOpen(false);
+          }}
+          onClose={() => setVoidPickerOpen(false)}
+          onRefresh={loadRecentOrders}
+        />
+      )}
+
+      {refundPickerOpen && (
+        <PickerModal
+          title="Refund · pick an order"
+          recentOrders={recentOrders}
+          recentLoading={recentLoading}
+          onPick={(o) => {
+            setRefundTarget(o);
+            setRefundAmount(o.total.toFixed(2));
+            setRefundPickerOpen(false);
+          }}
+          onClose={() => setRefundPickerOpen(false)}
+          onRefresh={loadRecentOrders}
+        />
       )}
 
       {voidTarget && (
@@ -1079,6 +1372,64 @@ export function PosClient() {
                 Cancel
               </button>
               <button onClick={voidOrder} className="btn-danger">Void</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {refundTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85">
+          <div className="panel w-full max-w-sm">
+            <h3 className="label">Refund order #{refundTarget.orderNumber}</h3>
+            <p className="mt-1 text-[11px] text-ink-dim">
+              Paid {formatAud(refundTarget.total)} · {refundTarget.paymentMethod}
+            </p>
+            <label className="mt-3 block text-xs">
+              <span className="label">Amount to refund</span>
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                max={refundTarget.total}
+                value={refundAmount}
+                onChange={(e) => setRefundAmount(e.target.value)}
+                className="mt-1 w-full rounded-sm px-3 py-2 num"
+                autoFocus
+              />
+              <div className="mt-1 flex gap-1">
+                {[0.25, 0.5, 0.75, 1].map((frac) => (
+                  <button
+                    key={frac}
+                    onClick={() => setRefundAmount((refundTarget.total * frac).toFixed(2))}
+                    className="btn flex-1 px-1 py-0.5 text-[10px]"
+                  >
+                    {frac === 1 ? "Full" : `${Math.round(frac * 100)}%`}
+                  </button>
+                ))}
+              </div>
+            </label>
+            <label className="mt-2 block text-xs">
+              <span className="label">Manager PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={refundPin}
+                onChange={(e) => setRefundPin(e.target.value.replace(/\D/g, ""))}
+                className="mt-1 w-full rounded-sm px-3 py-2 num"
+              />
+            </label>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setRefundTarget(null);
+                  setRefundPin("");
+                  setRefundAmount("");
+                }}
+                className="btn"
+              >
+                Cancel
+              </button>
+              <button onClick={submitRefund} className="btn-danger">Refund</button>
             </div>
           </div>
         </div>
@@ -1121,13 +1472,7 @@ export function PosClient() {
               />
             </label>
             <div className="mt-3 flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setRefusalOpen(false);
-                  setRefusalPin("");
-                }}
-                className="btn"
-              >
+              <button onClick={() => { setRefusalOpen(false); setRefusalPin(""); }} className="btn">
                 Cancel
               </button>
               <button onClick={submitRefusal} className="btn-danger">Log refusal</button>
@@ -1142,7 +1487,9 @@ export function PosClient() {
             <h3 className="label">Cash tendered</h3>
             <div className="mt-2 flex items-center justify-between text-xs text-ink-dim">
               <span>Total due</span>
-              <span className="num text-lg font-semibold text-ink">{formatAud(cartView.cashTotal)}</span>
+              <span className="num text-lg font-semibold text-ink">
+                {formatAud(cartView.cashTotal)}
+              </span>
             </div>
             <input
               type="number"
@@ -1183,22 +1530,262 @@ export function PosClient() {
               </div>
             )}
             <div className="mt-3 flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setCashOpen(false);
-                  setCashInput("");
-                }}
-                className="btn"
-              >
+              <button onClick={() => { setCashOpen(false); setCashInput(""); }} className="btn">
                 Cancel
               </button>
-              <button onClick={confirmCashTendered} className="btn-primary">
-                Confirm &amp; charge
+              <button onClick={confirmCashTendered} className="btn-primary">Confirm &amp; charge</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tipOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85">
+          <div className="panel w-full max-w-sm">
+            <h3 className="label">Add a tip?</h3>
+            <p className="mt-2 text-xs text-ink-dim">
+              Charge total: {formatAud(cartView.afterDiscountSubtotal)}
+            </p>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {TIP_PRESETS.map((p) => {
+                const tip = Math.round(cartView.afterDiscountSubtotal * p * 100) / 100;
+                return (
+                  <button
+                    key={p}
+                    onClick={() => confirmTip(tip)}
+                    className="btn flex flex-col items-center gap-0.5 py-2"
+                  >
+                    <span className="text-base font-semibold">{Math.round(p * 100)}%</span>
+                    <span className="num text-[10px] text-ink-dim">{formatAud(tip)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <label className="mt-3 block text-xs">
+              <span className="label">Custom tip ($)</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.5"
+                min="0"
+                value={tipCustom}
+                onChange={(e) => setTipCustom(e.target.value)}
+                className="mt-1 w-full rounded-sm px-3 py-2 num"
+              />
+            </label>
+            <div className="mt-3 flex justify-between gap-2">
+              <button onClick={() => confirmTip(0)} className="btn flex-1">No tip</button>
+              <button
+                onClick={() => {
+                  const t = parseFloat(tipCustom);
+                  confirmTip(Number.isFinite(t) && t > 0 ? t : 0);
+                }}
+                className="btn-primary flex-1"
+              >
+                Charge {formatAud(cartView.afterDiscountSubtotal + (parseFloat(tipCustom) || 0))}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {compOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85">
+          <div className="panel w-full max-w-sm">
+            <h3 className="label">Comp / discount</h3>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setCompMode("$")}
+                className={`btn ${compMode === "$" ? "border-bull text-bull" : ""}`}
+              >
+                $ off
+              </button>
+              <button
+                onClick={() => setCompMode("%")}
+                className={`btn ${compMode === "%" ? "border-bull text-bull" : ""}`}
+              >
+                % off
+              </button>
+            </div>
+            <input
+              type="number"
+              inputMode="decimal"
+              step={compMode === "%" ? "5" : "1"}
+              min="0"
+              max={compMode === "%" ? 100 : cartView.combinedSubtotal}
+              value={compInput}
+              onChange={(e) => setCompInput(e.target.value)}
+              placeholder={compMode === "%" ? "10" : "5.00"}
+              autoFocus
+              className="mt-2 w-full rounded-sm px-3 py-2 num text-xl"
+            />
+            <input
+              type="text"
+              value={compReason}
+              onChange={(e) => setCompReason(e.target.value)}
+              placeholder="Reason (required)"
+              className="mt-2 w-full rounded-sm px-3 py-2 text-xs"
+            />
+            <label className="mt-2 block text-xs">
+              <span className="label">Manager PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={compPin}
+                onChange={(e) => setCompPin(e.target.value.replace(/\D/g, ""))}
+                className="mt-1 w-full rounded-sm px-3 py-2 num"
+              />
+            </label>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setCompOpen(false);
+                  setCompInput("");
+                  setCompReason("");
+                  setCompPin("");
+                }}
+                className="btn"
+              >
+                Cancel
+              </button>
+              <button onClick={submitComp} className="btn-primary">Apply</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {outOfStockTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85">
+          <div className="panel w-full max-w-sm">
+            <h3 className="label">86 · out of stock</h3>
+            <p className="mt-2 text-sm">
+              Mark <span className="font-semibold">{outOfStockTarget.name}</span> as out of stock?
+            </p>
+            <p className="mt-1 text-[10px] text-ink-dim">
+              It vanishes from POS, tickers, and display until re-enabled in admin.
+            </p>
+            <label className="mt-3 block text-xs">
+              <span className="label">Manager PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={outOfStockPin}
+                onChange={(e) => setOutOfStockPin(e.target.value.replace(/\D/g, ""))}
+                className="mt-1 w-full rounded-sm px-3 py-2 num"
+                autoFocus
+              />
+            </label>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setOutOfStockTarget(null);
+                  setOutOfStockPin("");
+                }}
+                className="btn"
+              >
+                Cancel
+              </button>
+              <button onClick={submitOutOfStock} className="btn-danger">
+                86 it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {successOpen && (
+        <div
+          onClick={() => setSuccessOpen(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-bg/90"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="panel-brass frame-deco w-full max-w-md text-center"
+          >
+            <div className="label">Paid · #{successOpen.orderNumber.toString().padStart(4, "0")}</div>
+            <div className="mt-2 num text-3xl font-semibold text-bull">
+              {formatAud(successOpen.total)}
+            </div>
+            {successOpen.change !== null && (
+              <div className="mt-1 text-xs text-bull/80">
+                Change due {formatAud(successOpen.change)}
+              </div>
+            )}
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <QrImage
+                value={
+                  typeof window !== "undefined"
+                    ? `${window.location.origin}/receipts/${successOpen.id}`
+                    : `/receipts/${successOpen.id}`
+                }
+                size={180}
+              />
+              <p className="text-[11px] uppercase tracking-[0.18em] text-ink-dim">
+                Customer scans for receipt
+              </p>
+            </div>
+            <button onClick={() => setSuccessOpen(null)} className="btn-primary mt-4 w-full">
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+function PickerModal({
+  title,
+  recentOrders,
+  recentLoading,
+  onPick,
+  onClose,
+  onRefresh,
+}: {
+  title: string;
+  recentOrders: RecentOrder[];
+  recentLoading: boolean;
+  onPick: (o: RecentOrder) => void;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg/85 p-4">
+      <div className="panel w-full max-w-lg">
+        <div className="flex items-center justify-between">
+          <h3 className="label">{title}</h3>
+          <button onClick={onRefresh} className="btn text-[10px]">refresh</button>
+        </div>
+        <div className="mt-3 max-h-80 overflow-y-auto">
+          {recentLoading && <p className="num text-[11px] text-ink-dim">[ loading... ]</p>}
+          {!recentLoading && recentOrders.length === 0 && (
+            <p className="num text-[11px] text-ink-dim">[ no paid orders ]</p>
+          )}
+          <ul className="space-y-1">
+            {recentOrders.map((o) => (
+              <li key={o.id}>
+                <button
+                  onClick={() => onPick(o)}
+                  className="w-full rounded-sm border border-edge p-2 text-left hover:border-bear hover:bg-bear/5"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="num font-semibold">
+                      #{o.orderNumber.toString().padStart(4, "0")}
+                    </span>
+                    <span className="num">{formatAud(o.total)}</span>
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-ink-dim">
+                    {o.lines.map((l) => `${l.quantity}x ${l.drinkNameSnapshot}`).join(", ")}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="mt-3 flex justify-end">
+          <button onClick={onClose} className="btn">Close</button>
+        </div>
+      </div>
+    </div>
   );
 }

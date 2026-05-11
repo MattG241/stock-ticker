@@ -35,7 +35,7 @@ export interface CrashEvent {
   endsAt: string;
   discountPercent: number;
   triggeredBy: string;
-  triggeredVia: "manual" | "scheduled" | "social" | "event";
+  triggeredVia: "manual" | "scheduled" | "social" | "event" | "closing-bell";
   totalOrdersDuringCrash: number;
   totalRevenueDuringCrash: number;
   cancelledEarly: boolean;
@@ -77,6 +77,9 @@ export interface Order {
   idempotencyKey: string | null;
   paymentChargeId: string | null;
   cashTendered: number | null;
+  tipAmount: number;
+  discountAmount: number;
+  discountReason: string | null;
   barAcked: boolean;
   barAckedAt: string | null;
   barAckedBy: string | null;

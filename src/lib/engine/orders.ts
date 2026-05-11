@@ -7,6 +7,7 @@ import { effectiveDisplayPrice, getActiveCrash, type ActiveCrashView } from "./c
 import { getPaymentProvider } from "../providers/payment";
 import { getReceiptProvider } from "../providers/receipt";
 import { persistOrder } from "../db/repos";
+import { requireRole } from "./staff";
 
 const IDEMPOTENCY_TTL_MS = 5 * 60_000;
 const RECENT_SALES_CAP = 12;
@@ -34,6 +35,10 @@ export interface PlaceOrderInput {
   idempotencyKey?: string;
   idCheck?: boolean;
   cashTendered?: number;
+  tipAmount?: number;
+  discountAmount?: number;
+  discountReason?: string;
+  managerPin?: string;
 }
 
 export type PlaceOrderResult =
@@ -207,6 +212,9 @@ function newOrderShell(input: PlaceOrderInput): Order {
     idempotencyKey: input.idempotencyKey ?? null,
     paymentChargeId: null,
     cashTendered: null,
+    tipAmount: 0,
+    discountAmount: 0,
+    discountReason: null,
     barAcked: false,
     barAckedAt: null,
     barAckedBy: null,
@@ -240,6 +248,9 @@ export function openTab(staffId: string, tabName: string, idCheck = false): Orde
     idempotencyKey: null,
     paymentChargeId: null,
     cashTendered: null,
+    tipAmount: 0,
+    discountAmount: 0,
+    discountReason: null,
     barAcked: false,
     barAckedAt: null,
     barAckedBy: null,
@@ -315,15 +326,58 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
 
   // 3. Compute final totals (preview - not committed).
   const previewSubtotal = roundCurrency(order.subtotal + (plan?.subtotalDelta ?? 0));
+
+  // Discount: validated server-side, requires manager PIN.
+  let discountAmount = 0;
+  let discountReason: string | null = null;
+  if (input.discountAmount && input.discountAmount > 0) {
+    if (!input.managerPin) {
+      if (isNewOrder) store.nextOrderNumber -= 1;
+      return { ok: false, reason: "Manager PIN required for discounts" };
+    }
+    const manager = requireRole(input.managerPin, ["manager", "admin", "owner"]);
+    if (!manager) {
+      if (isNewOrder) store.nextOrderNumber -= 1;
+      return { ok: false, reason: "Bad manager PIN" };
+    }
+    if (input.discountAmount > previewSubtotal) {
+      if (isNewOrder) store.nextOrderNumber -= 1;
+      return { ok: false, reason: "Discount exceeds subtotal" };
+    }
+    if (!input.discountReason || !input.discountReason.trim()) {
+      if (isNewOrder) store.nextOrderNumber -= 1;
+      return { ok: false, reason: "Discount reason required" };
+    }
+    discountAmount = roundCurrency(input.discountAmount);
+    discountReason = input.discountReason.trim();
+  }
+  const discountedSubtotal = roundCurrency(previewSubtotal - discountAmount);
   const previewGst = roundCurrency(
-    previewSubtotal - previewSubtotal / (1 + settings.gstRate),
+    discountedSubtotal - discountedSubtotal / (1 + settings.gstRate),
   );
-  let previewTotal = previewSubtotal;
+
+  // Tip (card only, not taxable, not subject to cash rounding).
+  let tipAmount = 0;
+  if (input.tipAmount && input.tipAmount > 0) {
+    if (input.paymentMethod !== "card") {
+      if (isNewOrder) store.nextOrderNumber -= 1;
+      return { ok: false, reason: "Tips can only be added on card payments" };
+    }
+    if (input.tipAmount > 1000) {
+      if (isNewOrder) store.nextOrderNumber -= 1;
+      return { ok: false, reason: "Tip exceeds limit" };
+    }
+    tipAmount = roundCurrency(input.tipAmount);
+  }
+
+  let previewTotal = discountedSubtotal;
   let previewCashAdjustment = 0;
   if (input.paymentMethod === "cash") {
-    previewTotal = roundCashAud(previewSubtotal);
-    previewCashAdjustment = roundCurrency(previewTotal - previewSubtotal);
+    const rounded = roundCashAud(discountedSubtotal);
+    previewCashAdjustment = roundCurrency(rounded - discountedSubtotal);
+    previewTotal = rounded;
   }
+  previewTotal = roundCurrency(previewTotal + tipAmount);
 
   // 4. Charge BEFORE committing line mutations or price impact.
   const provider = getPaymentProvider();
@@ -349,6 +403,9 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
   order.gstAmount = previewGst;
   order.total = previewTotal;
   order.cashAdjustment = previewCashAdjustment;
+  order.tipAmount = tipAmount;
+  order.discountAmount = discountAmount;
+  order.discountReason = discountReason;
   order.paymentMethod = input.paymentMethod;
   order.paymentChargeId = charge.chargeId;
   order.status = "paid";
@@ -372,6 +429,9 @@ export async function placeOrder(input: PlaceOrderInput): Promise<PlaceOrderResu
     total: order.total,
     cashAdjustment: order.cashAdjustment,
     cashTendered: order.cashTendered,
+    tipAmount: order.tipAmount,
+    discountAmount: order.discountAmount,
+    discountReason: order.discountReason,
     chargeId: charge.chargeId,
     provider: charge.provider,
     idCheck: order.idCheck,

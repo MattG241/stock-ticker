@@ -148,6 +148,14 @@
   );
 }
 
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 .display-scanlines::after {
   content: "";
   position: fixed;

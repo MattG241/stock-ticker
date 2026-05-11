@@ -38,6 +38,8 @@ const config: Config = {
         "bull-dim": "#007A42",
         bear: "#C0322F",
         "bear-dim": "#7A1F1D",
+        amber: "#E0A040",
+        "amber-dim": "#A06D20",
         emerald: "#003432",
       },
       fontFamily: {

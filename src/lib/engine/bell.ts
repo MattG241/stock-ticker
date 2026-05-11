@@ -36,7 +36,7 @@ export function checkClosingBell(): void {
       discountPercent: BELL_DISCOUNT,
       durationSeconds: BELL_DURATION_S,
       triggeredBy: "closing-bell",
-      triggeredVia: "scheduled",
+      triggeredVia: "closing-bell",
     });
     recordAudit("closing-bell", "crash.last-call", { ok: result.ok });
   }
