@@ -15,30 +15,38 @@ const lineSchema = z.object({
   locked: z.boolean().default(true),
 });
 
-const schema = z.object({
-  lines: z.array(lineSchema).default([]),
-  subtotal: z.number().nonnegative().default(0),
-  discountAmount: z.number().nonnegative().default(0),
-  discountReason: z.string().nullable().default(null),
-  tipAmount: z.number().nonnegative().default(0),
-  cashAdjustment: z.number().default(0),
-  total: z.number().nonnegative().default(0),
-  paymentMethod: z.enum(["card", "cash"]).nullable().default(null),
-  cashTendered: z.number().nullable().default(null),
-  changeDue: z.number().nullable().default(null),
-  status: z
-    .enum([
-      "idle",
-      "building",
-      "awaiting-tip",
-      "awaiting-cash",
-      "processing",
-      "paid",
-      "failed",
-    ])
-    .default("building"),
-  lastOrderNumber: z.number().nullable().default(null),
-  lastReceiptUrl: z.string().nullable().default(null),
+const statusEnum = z.enum([
+  "idle",
+  "building",
+  "awaiting-customer-tip",
+  "customer-tip-confirmed",
+  "awaiting-card-tap",
+  "customer-card-tapped",
+  "awaiting-cash-tender",
+  "processing",
+  "paid",
+  "failed",
+]);
+
+// All fields optional - this endpoint accepts partial updates (e.g. customer
+// screen only sends { status, tipAmount }).
+const partialSchema = z.object({
+  lines: z.array(lineSchema).optional(),
+  subtotal: z.number().nonnegative().optional(),
+  discountAmount: z.number().nonnegative().optional(),
+  discountReason: z.string().nullable().optional(),
+  tipAmount: z.number().nonnegative().optional(),
+  cashAdjustment: z.number().optional(),
+  total: z.number().nonnegative().optional(),
+  paymentMethod: z.enum(["card", "cash"]).nullable().optional(),
+  cashTendered: z.number().nullable().optional(),
+  changeDue: z.number().nullable().optional(),
+  status: statusEnum.optional(),
+  lastOrderId: z.string().nullable().optional(),
+  lastOrderNumber: z.number().nullable().optional(),
+  lastReceiptUrl: z.string().nullable().optional(),
+  customerEmail: z.string().nullable().optional(),
+  receiptSent: z.boolean().optional(),
 });
 
 export const dynamic = "force-dynamic";
@@ -49,17 +57,17 @@ export function GET() {
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
-  // Special command: reset.
   if (body && body.command === "reset") {
     store.customerView = emptyCustomerView();
     broadcast({ type: "customer.view.updated", payload: store.customerView });
     return NextResponse.json({ ok: true, view: store.customerView });
   }
-  const parsed = schema.safeParse(body);
+  const parsed = partialSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ ok: false, reason: "Bad payload" }, { status: 400 });
   }
-  store.customerView = { ...parsed.data, updatedAt: nowIso() };
+  const cur = store.customerView ?? emptyCustomerView();
+  store.customerView = { ...cur, ...parsed.data, updatedAt: nowIso() };
   broadcast({ type: "customer.view.updated", payload: store.customerView });
   return NextResponse.json({ ok: true, view: store.customerView });
 }

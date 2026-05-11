@@ -200,6 +200,10 @@ export function PosClient() {
     change: number | null;
   } | null>(null);
 
+  // Customer-driven flow state.
+  const [waitingForCustomer, setWaitingForCustomer] = useState(false);
+  const [customerStatus, setCustomerStatus] = useState<CustomerView["status"]>("idle");
+
   // Clock tick for closing countdown.
   const [, setClockTick] = useState(0);
 
@@ -207,6 +211,12 @@ export function PosClient() {
   const chargingRef = useRef(false);
   const drainRef = useRef(false);
   const idempotencyRef = useRef<string | null>(null);
+  // For SSE handlers that need to call up-to-date closures.
+  const sendOrderRef = useRef<
+    ((opts?: { cashTendered?: number; tipAmount?: number }) => Promise<void>) | null
+  >(null);
+  const paymentMethodRef = useRef<"card" | "cash">(paymentMethod);
+  paymentMethodRef.current = paymentMethod;
 
   // Boot from localStorage.
   useEffect(() => {
@@ -515,6 +525,50 @@ export function PosClient() {
     return () => clearTimeout(t);
   }, [publishView, staffId]);
 
+  // SSE subscription: react when the customer screen drives status forward.
+  useEffect(() => {
+    if (!staffId) return;
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource("/api/events");
+      es.addEventListener("customer.view.updated", (e) => {
+        try {
+          const v = JSON.parse((e as MessageEvent).data) as CustomerView;
+          setCustomerStatus(v.status);
+          if (v.status === "customer-tip-confirmed") {
+            // Customer chose a tip. Advance.
+            setPendingTip(v.tipAmount);
+            if (paymentMethodRef.current === "card") {
+              fetch("/api/pos/customer-view", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: "awaiting-card-tap", tipAmount: v.tipAmount }),
+              });
+            } else {
+              fetch("/api/pos/customer-view", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ status: "awaiting-cash-tender", tipAmount: v.tipAmount }),
+              });
+              setCashInput("");
+              setCashOpen(true);
+              setWaitingForCustomer(false);
+            }
+          } else if (v.status === "customer-card-tapped") {
+            // Customer tapped to pay - submit the order.
+            sendOrderRef.current?.({ tipAmount: v.tipAmount });
+            setWaitingForCustomer(false);
+          }
+        } catch {
+          // ignore
+        }
+      });
+    } catch {
+      // SSE unavailable
+    }
+    return () => es?.close();
+  }, [staffId]);
+
   const ensureIdempotencyKey = useCallback(() => {
     if (!idempotencyRef.current) {
       const k = newIdempotencyKey();
@@ -716,8 +770,11 @@ export function PosClient() {
           tipAmount: data.order.tipAmount ?? 0,
           cashTendered: opts?.cashTendered ?? null,
           changeDue: change,
+          lastOrderId: data.order.id,
           lastOrderNumber: data.order.orderNumber,
           lastReceiptUrl: receiptUrl,
+          customerEmail: null,
+          receiptSent: false,
         });
         // Auto-clear customer-view to idle after 8 seconds so the next customer
         // sees a clean welcome screen.
@@ -754,18 +811,43 @@ export function PosClient() {
       chargingRef.current = false;
       setCharging(false);
       setPendingTip(0);
+      setWaitingForCustomer(false);
     }
   };
+  // Keep the ref in sync so the SSE handler always calls the latest closure.
+  sendOrderRef.current = sendOrder;
 
   const onChargePressed = () => {
     if (!isOpen) {
       setToast({ kind: "err", msg: "Market is closed - no orders" });
       return;
     }
-    setTipCustom("");
+    if (!cartView.lines.length && !activeTabId) return;
     setPendingTip(0);
-    setTipOpen(true);
-    publishView({ status: "awaiting-tip" });
+    setWaitingForCustomer(true);
+    setCustomerStatus("awaiting-customer-tip");
+    publishView({ status: "awaiting-customer-tip" });
+  };
+
+  const cancelCustomerFlow = () => {
+    setWaitingForCustomer(false);
+    setPendingTip(0);
+    // Restore the customer screen to a build state showing the order.
+    publishView({ status: "building" });
+  };
+
+  const skipTipAndCharge = () => {
+    setPendingTip(0);
+    if (paymentMethod === "cash") {
+      publishView({ status: "awaiting-cash-tender", tipAmount: 0 });
+      setCashInput("");
+      setCashOpen(true);
+      setWaitingForCustomer(false);
+    } else {
+      setWaitingForCustomer(false);
+      publishView({ status: "processing", tipAmount: 0 });
+      sendOrder({ tipAmount: 0 });
+    }
   };
 
   const confirmTip = (tipAmount: number) => {
@@ -774,7 +856,7 @@ export function PosClient() {
     if (paymentMethod === "cash") {
       setCashInput("");
       setCashOpen(true);
-      publishView({ status: "awaiting-cash", tipAmount });
+      publishView({ status: "awaiting-cash-tender", tipAmount });
     } else {
       sendOrder({ tipAmount });
     }
@@ -1416,24 +1498,31 @@ export function PosClient() {
             )}
             <button
               onClick={onChargePressed}
-              disabled={charging || !isOpen || (!cartView.lines.length && !activeTabId)}
+              disabled={
+                charging ||
+                waitingForCustomer ||
+                !isOpen ||
+                (!cartView.lines.length && !activeTabId)
+              }
               className="btn-primary disabled:opacity-40"
             >
               {charging
                 ? "Charging..."
-                : !isOpen
-                  ? "Market closed"
-                  : activeTabId
-                    ? `Close tab ${formatAud(
-                        paymentMethod === "cash"
-                          ? cartView.cashTotal
-                          : cartView.afterDiscountSubtotal,
-                      )}`
-                    : `Charge ${formatAud(
-                        paymentMethod === "cash"
-                          ? cartView.cashTotal
-                          : cartView.afterDiscountSubtotal,
-                      )}`}
+                : waitingForCustomer
+                  ? "Customer screen…"
+                  : !isOpen
+                    ? "Market closed"
+                    : activeTabId
+                      ? `Close tab ${formatAud(
+                          paymentMethod === "cash"
+                            ? cartView.cashTotal
+                            : cartView.afterDiscountSubtotal,
+                        )}`
+                      : `Charge ${formatAud(
+                          paymentMethod === "cash"
+                            ? cartView.cashTotal
+                            : cartView.afterDiscountSubtotal,
+                        )}`}
             </button>
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -1899,6 +1988,46 @@ export function PosClient() {
                 {stockTarget.action === "86" ? "86 it" : "Restock"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {waitingForCustomer && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-bg/85 p-4">
+          <div className="panel-brass frame-deco w-full max-w-md text-center">
+            <div className="label">Customer screen</div>
+            <h3 className="serif mt-2 text-2xl font-semibold">
+              {customerStatus === "awaiting-customer-tip"
+                ? "Customer is choosing a tip…"
+                : customerStatus === "customer-tip-confirmed"
+                  ? "Tip locked in — advancing…"
+                  : customerStatus === "awaiting-card-tap"
+                    ? "Customer tapping card…"
+                    : customerStatus === "customer-card-tapped"
+                      ? "Reading card…"
+                      : customerStatus === "processing"
+                        ? "Settling trade…"
+                        : "Waiting for customer…"}
+            </h3>
+            <p className="mt-2 text-xs text-ink-dim">
+              They&rsquo;re seeing your order on the customer screen. They&rsquo;ll pick a tip and tap to pay.
+            </p>
+            {pendingTip > 0 && (
+              <p className="mt-2 text-[11px] text-bull">
+                Tip locked: {formatAud(pendingTip)}
+              </p>
+            )}
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button onClick={cancelCustomerFlow} className="btn">
+                Cancel
+              </button>
+              <button onClick={skipTipAndCharge} className="btn-primary">
+                Skip tip &amp; charge
+              </button>
+            </div>
+            <p className="mt-3 text-[10px] uppercase tracking-[0.22em] text-ink-ghost">
+              Open the customer screen at /customer on a second iPad
+            </p>
           </div>
         </div>
       )}

@@ -186,6 +186,7 @@ export type RealtimeEvent =
   | { type: "drink.deleted"; payload: { drinkId: string } }
   | { type: "settings.updated"; payload: Settings }
   | { type: "customer.view.updated"; payload: CustomerView };
+// CustomerView is defined below; the type declaration order doesn't matter for type-only references.
 
 export interface CustomerViewLine {
   drinkId: string;
@@ -196,6 +197,24 @@ export interface CustomerViewLine {
   lineTotal: number;
   locked: boolean;
 }
+
+export type CustomerViewStatus =
+  | "idle"
+  // POS is still building the cart - read-only on customer screen
+  | "building"
+  // Customer is choosing a tip on their screen (interactive)
+  | "awaiting-customer-tip"
+  // Customer chose a tip - waits for POS to advance
+  | "customer-tip-confirmed"
+  // Customer screen shows "Tap your card to pay" (interactive)
+  | "awaiting-card-tap"
+  // Customer tapped card - POS submits order next
+  | "customer-card-tapped"
+  // Bartender is taking cash on POS while customer waits
+  | "awaiting-cash-tender"
+  | "processing"
+  | "paid"
+  | "failed";
 
 export interface CustomerView {
   lines: CustomerViewLine[];
@@ -208,15 +227,11 @@ export interface CustomerView {
   paymentMethod: "card" | "cash" | null;
   cashTendered: number | null;
   changeDue: number | null;
-  status:
-    | "idle"
-    | "building"
-    | "awaiting-tip"
-    | "awaiting-cash"
-    | "processing"
-    | "paid"
-    | "failed";
+  status: CustomerViewStatus;
+  lastOrderId: string | null;
   lastOrderNumber: number | null;
   lastReceiptUrl: string | null;
+  customerEmail: string | null;
+  receiptSent: boolean;
   updatedAt: string;
 }

@@ -62,8 +62,11 @@ export function emptyCustomerView(): CustomerView {
     cashTendered: null,
     changeDue: null,
     status: "idle",
+    lastOrderId: null,
     lastOrderNumber: null,
     lastReceiptUrl: null,
+    customerEmail: null,
+    receiptSent: false,
     updatedAt: new Date().toISOString(),
   };
 }
